@@ -145,6 +145,8 @@ const ENEMY_GUNS = {
   Magnum: { ...GUNS['9mm'], cooldown: 20, shake: 6, spread: 6, sound: 'sndMagnum' },
   // The soldier's Kalashnikov fires a step faster than the mafia's.
   SoldierKalashnikov: { ...GUNS['9mm'], cooldown: 4, shake: 3, spread: 10, sound: 'sndKalashnikov' },
+  FatGun: { ...GUNS['9mm'], cooldown: 4, shake: 6, spread: 16, sound: 'sndMP5' },
+  Hiding: { ...GUNS['9mm'], cooldown: 4, shake: 6, spread: 6, sound: 'snd9mm' },
 };
 // The Colombian, soldier, guard, police and prisoner steps (0x6064f0,
 // 0xb440f0, 0x803a80, 0x7591a0, 0x9ab9a0) are the mafia step 0x74d0b0 with
@@ -170,7 +172,21 @@ export const PATH = { cell: 16, every: 20, speed: 2.5, rings: [1, 6, 11], angles
 // IdleMoney also drops an objMoneyBag at +2, +8 (drawn here as a still
 // sprMoneyBag; what the bag does is not read), and the silenced one sets var
 // 15 to 12 on the new enemy (not read).
-export const IDLE = { every: 15, imageSpeed: 0.15, bag: { object: 'objEGangIdleMoney', sprite: 'sprMoneyBag', dx: 2, dy: 8 }, become: {
+// The faction idles (creates 0x602bd0 0x7ff8d0 0x9a4dd0 0xb404d0, steps
+// 0x603160 0x7ffb30 0x9a4fd0 0xb40730) test on the same 15-step timer and
+// turn into their walk sprite (sprColombianWalkPipe, sprGuardWalkStick,
+// sprSoldierWalkKalashnikov) in place. The prisoner with guns leaves an
+// instance drawn with sprPrisonerIdleGunsBody and makes a new enemy from a
+// global not resolved; a shotgun prisoner is a guess.
+export const IDLE = { every: 15, imageSpeed: 0.15, leave: {
+  objEGangIdleMoney: { sprite: 'sprMoneyBag', dx: 2, dy: 8, still: true },
+  objPrisonerIdleGuns: { sprite: 'sprPrisonerIdleGunsBody', dx: 0, dy: 0 },
+}, become: {
+  objColombianIdlePipe: ['objColombianMeleeRandom', 'Pipe'],
+  objGuardIdleStick: ['objGuardMeleeRandom', 'Stick'],
+  objSoldierIdleRain: ['objSoldierRandom', 'Kalashnikov'],
+  objSoldierIdlePonchoSmoke: ['objSoldierRandom', 'Kalashnikov'],
+  objPrisonerIdleGuns: ['objPrisonerRandom', 'Shotgun'],
   objEGangIdlePipe: ['objEGangMeleeRandom', 'Pipe'],
   objEGangIdleKnife: ['objEGangMeleeRandom', 'Knife'],
   objEGangIdleMoney: ['objEGangRandom'],
@@ -185,7 +201,44 @@ export const IDLE = { every: 15, imageSpeed: 0.15, bag: { object: 'objEGangIdleM
 // var 97 counts down from 100 a step and at 0 they fall anyway. Melee and
 // thrown weapons not knocking them over is a guess (the player's side is not
 // read), as is the fall leaving a body that counts as dead.
-export const FAT = { hp: 5, bleed: 100 };
+// The soldier, police and prisoner fat steps (0xb3d4e0, 0x7ac4c0, 0x9a39f0)
+// are the same code with their own sprites. objSoldierFatGun (create
+// 0xb3c9a0, step 0xb3cc30) has the same 5 HP and bleed-out but carries a gun:
+// 0xee5fa0's sprFatSoldierWalkGun branch fires every 4 steps, shake 6, aim
+// +-16, sndMP5. Its own chase routine 0x11a02e0 is not read; it runs the
+// mafia AI here.
+export const FAT = { hp: 5, bleed: 100, kinds: {
+  objEMafiaFat: {}, objEGangFat: {},
+  objSoldierFatKnife: { walk: 'sprFatSoldierWalkKnife', attack: 'sprFatSoldierAttackKnife', legs: 'sprFatSoldierLegs', die: 'sprFatSoldierDying' },
+  objSoldierFatGun: { walk: 'sprFatSoldierWalkGun', attack: 'sprFatSoldierAttackGun', legs: 'sprFatSoldierLegs', die: 'sprFatSoldierDying', gun: 'FatGun' },
+  objFatPolice: { walk: 'sprFatPoliceWalk', attack: 'sprFatPoliceAttack', die: 'sprFatPoliceDying' },
+  objPrisonerFat: { walk: 'sprPrisonerWalkFat', attack: 'sprPrisonerAttackFat', legs: 'sprPrisonerFatLegs', die: 'sprPrisonerDieFat' },
+} };
+// Dodgers (objColombianDodger/objGangDodger/objSoldierDodger, one step code):
+// unarmed chasers on the gang AI (0xd96830). A bullet, or a weapon flying
+// faster than 4, starts sprDodger*Dodge at frame 0 and stops them; one landing
+// mid-dodge holds it at frame 3. The dodge runs at 0.25 to frame 3, then 0.5,
+// and at 15 they walk again. sprColombianDodgerStunned (all three steps test
+// that one) runs at 0.25 to frame 5. What stuns them is not read: a door here.
+// Melee is taken to kill them. objPrisonerPsycho (create 0x9a9240, step
+// 0x9a9bf0) has the same dodge handlers and idles on one of
+// sprPrisonerIdlePsycho1-3 at 0.15, testing for the player every 15 steps.
+export const DODGER = { slow: 0.25, fast: 0.5, hold: 3, end: 15, stun: 0.25, stunEnd: 5, wake: 15, idleSpeed: 0.15, kinds: {
+  objColombianDodger: { walk: 'sprColombianDodgerWalk', attack: 'sprColombianDodgerAttack', dodge: 'sprColombianDodgerDodge', dead: 'sprColombianDeadBlunt' },
+  objGangDodger: { walk: 'sprGangDodgerWalk', attack: 'sprGangDodgerAttack', dodge: 'sprGangDodgerDodge', dead: 'sprGangDodgerDead' },
+  objSoldierDodger: { walk: 'sprSoldierDodgerWalk', attack: 'sprSoldierDodgerAttack1', dodge: 'sprSoldierDodgerDodge', dead: 'sprSoldierDodgerDead' },
+  objPrisonerPsycho: { walk: 'sprPrisonerWalkPsycho', attack: 'sprPrisonerKillPsycho', dodge: 'sprPrisonerPsychoDodge',
+    stunned: 'sprPrisonerPsychoStunned', dead: 'sprPrisonerDeadBlunt', idle: ['sprPrisonerIdlePsycho1', 'sprPrisonerIdlePsycho2', 'sprPrisonerIdlePsycho3'] },
+} };
+// Hiding gunners (create 0x6006c0, steps 0x6013a0 / 0xb3e6a0): they stay put.
+// Every 8 steps (first after random(10)) they test for the player; seen, they
+// rise at 0.25 to frame 4 and fire 24 rounds every 4 steps, shake 6, aim +-6,
+// snd9mm, then reload (sprColombianHidingReload at 0.2). Their hit points
+// (var 95) are not read: one bullet or hit kills here.
+export const HIDE = { every: 8, first: 10, rise: 0.25, up: 4, ammo: 24, reload: 0.2, reloadSteps: 125, kinds: {
+  objColombianHiding: { base: 'sprColombian', sprite: 'sprColombianHiding', reload: 'sprColombianHidingReload' },
+  objSoldierHiding: { base: 'sprSoldier', sprite: 'sprSoldierHiding' },
+} };
 // Dogs (objDogPatrol: create 0x6be760 -> objDog 0xe02560, step 0x6bf290 ->
 // 0xe02cf0). A state machine in var 31: sight is tested on a timer (var 88,
 // first random(10)); in sight the dog runs straight at the player at 4
@@ -204,6 +257,10 @@ export const DOG = { recheck: 10, speed: 4, kill: 22, imageSpeed: 0.1, runImage:
 // one frame per direction (from vars 32/36). Here the direction is taken from
 // the nearest room edge, which is a guess.
 export const EXIT = { objects: ['objNextroom'] };
+// objFloorCleared (create 0x7b45a0, step 0x7b5240) shows sprFloorCleared
+// (frame 0 FLOOR CLEARED, 1 AREA CLEARED) once the floor is clear; its slide
+// in is not read, so it sits centred 44px above the bottom of the view.
+export const CLEARED = { sprite: 'sprFloorCleared', bottom: 44 };
 // objElevator (810, Mall and NewsPaper floors; room start 0x7698e0, step
 // 0x76a430, room end 0x76a2e0). Drawn as sprElevatorDown, frame 0 shut and
 // 14 open; whether the player is inside is tested with the sprElevatorFloor
@@ -423,7 +480,7 @@ export async function play(env) {
   }
   P.deadShot = need(pre + 'DeadShot');
   P.deadBlunt = need(pre + 'DeadBlunt') || P.deadShot;
-  const bulletSprite = need('sprBullet'), bagSprite = need(IDLE.bag.sprite);
+  const bulletSprite = need('sprBullet'), clearedArt = art.get(need(CLEARED.sprite)), leaveSprite = Object.fromEntries(Object.entries(IDLE.leave).map(([k, v]) => [k, need(v.sprite)]));
   const box = maskBox(G, pobj);
   const sol = buildSolids(G, room);
   const pg = buildPathGrid(G, room);
@@ -450,15 +507,36 @@ export async function play(env) {
       Object.assign(e, { dog: true, mafia: true, gun: null, hs: 0, vs: 0, moveDir: 0, legFrame: 0, alarm: 1, check: Math.floor(random(DOG.recheck)), cooldown: 0, wait: 0, seen: null });
       e.imageSpeed = 0;
     }
-    const fat = /^objE(Mafia|Gang)Fat$/.test(o.name);
+    const dodger = DODGER.kinds[o.name], hide = HIDE.kinds[o.name];
+    if (dodger) {
+      Object.assign(e.spr, { walk: need(dodger.walk), attack: need(dodger.attack), dodge: need(dodger.dodge),
+        stunned: need(dodger.stunned || 'sprColombianDodgerStunned'), getUp: null, killStomp: null, legs: null });
+      e.spr.deadShot = e.spr.deadShotgun = e.spr.deadBlunt = need(dodger.dead);
+      e.spr.idle = dodger.idle ? need(dodger.idle[Math.floor(random(dodger.idle.length))]) : e.spr.walk;
+      Object.assign(e, { dodger: true, mafia: true, gun: null, g: null, hs: 0, vs: 0, moveDir: 0, legFrame: 0, alarm: 1, check: Math.floor(random(ENEMY.recheck)), cooldown: 0, wait: 0, seen: null, imageSpeed: 0 });
+      if (dodger.idle && !walking) Object.assign(e, { sleep: true, wake: Math.floor(random(DODGER.wake)), imageSpeed: DODGER.idleSpeed });
+      e.sprite = e.sleep ? e.spr.idle : e.spr.walk;
+      return e;
+    }
+    if (hide) {
+      Object.assign(e.spr, { idle: need(hide.sprite), walk: null, reload: hide.reload ? need(hide.reload) : null, getUp: null });
+      e.spr.deadBlunt = need(hide.base + 'DeadBlunt') || need(hide.base + 'DeadMachinegun');
+      e.spr.deadShot = need(hide.base + 'DeadMachinegun') || e.spr.deadBlunt;
+      e.spr.deadShotgun = need(hide.base + 'DeadShotgun') || e.spr.deadShot;
+      Object.assign(e, { hiding: true, g: ENEMY_GUNS.Hiding, ammo: HIDE.ammo, reloading: 0, check: Math.floor(random(HIDE.first)), cooldown: 0, imageSpeed: 0 });
+      e.sprite = e.spr.idle;
+      return e;
+    }
+    const fat = FAT.kinds[o.name];
     const armed = (fat || FACTION.test(o.name)) && (fat ? 'Unarmed' : (sname.match(/Walk(\w+)$/) || [])[1]);
     if (fat) {
       Object.assign(e, { fat: true, hp: FAT.hp, bleed: FAT.bleed });
-      e.spr.walk = need(base + 'Walk'); e.spr.die = need(base + 'Die');
-      e.spr.attack = need(base + 'Attack'); e.spr.legs = need(base + 'Legs');
+      e.spr.walk = need(fat.walk || base + 'Walk'); e.spr.die = need(fat.die || base + 'Die');
+      e.spr.attack = need(fat.attack || base + 'Attack'); e.spr.legs = fat.legs ? need(fat.legs) : need(base + 'Legs');
+      e.spr.idle = e.spr.walk;
       e.spr.deadShot = e.spr.deadShotgun = e.spr.die;
       e.spr.getUp = null;
-      Object.assign(e, { mafia: true, gun: null, hs: 0, vs: 0, moveDir: 0, legFrame: 0, alarm: 1, check: Math.floor(random(ENEMY.recheck)), cooldown: 0, wait: 0, seen: null });
+      Object.assign(e, { mafia: true, gun: null, g: ENEMY_GUNS[fat.gun], hs: 0, vs: 0, moveDir: 0, legFrame: 0, alarm: 1, check: Math.floor(random(ENEMY.recheck)), cooldown: 0, wait: 0, seen: null });
       e.imageSpeed = 0;
     } else if (armed) {
       let held = gun ?? armed;
@@ -538,6 +616,8 @@ export async function play(env) {
   // Most rooms have no player instance; then start near the centre, clear of enemies.
   // Coming up from the floor before, the player stays where they were.
   const carry = env.carry;
+  // The level's tally so far: kills and steps, from the floors before.
+  const stats = { kills: 0, steps: 0, ...carry?.stats };
   const clear = (x, y) => carry || spawn || enemies.every(e => Math.hypot(e.x - x, e.y - y) > 64);
   const lift = carry?.elevator && elevators.reduce((a, l) => !a || Math.abs(l.x - carry.elevator.x) < Math.abs(a.x - carry.elevator.x) ? l : a, null);
   if (lift) { carry.x = lift.to.x; carry.y = lift.to.y; }
@@ -604,7 +684,12 @@ export async function play(env) {
     e.gun = null;
   }
   function knockOut(e, dir, sound) {
-    if (e.dog) { sfx(sound); return shoot(e, dir, false, e.spr.deadBlunt); }
+    if (e.dodger && sound === SOUND.thrown) return evade(e);
+    if (e.dodger && sound === SOUND.door) {
+      Object.assign(e, { sprite: e.spr.stunned, frame: 0, hs: 0, vs: 0, path: null, sleep: false, alert: true });
+      return;
+    }
+    if (e.dog || e.dodger || e.hiding) { sfx(sound); return shoot(e, dir, false, e.spr.deadBlunt); }
     if (!e.spr.getUp || e.fat) return;
     sfx(sound);
     enemies.splice(enemies.indexOf(e), 1);
@@ -613,10 +698,20 @@ export async function play(env) {
       frame: 1, imageSpeed: 0, alarm: Math.floor(random(KO.waitRand)) + KO.waitMin, box: e.box, gun: e.gun });
     cam.shake = KO.shake;
   }
+  // A dodger hit by a bullet or a thrown weapon starts its dodge, or holds it.
+  function evade(e) {
+    if (e.sprite !== e.spr.dodge) Object.assign(e, { sprite: e.spr.dodge, frame: 0, hs: 0, vs: 0, path: null });
+    else if (e.frame > DODGER.hold) e.frame = DODGER.hold;
+    e.sleep = false; e.alert = true;
+  }
+  function bulletHit(e, dir, shotgun) {
+    if (e.dodger) evade(e); else shoot(e, dir, shotgun);
+  }
   // A bullet kills outright. The dead sprites hold several poses; picking
   // one at random is a guess.
   function shoot(e, dir, shotgun, sprite) {
     if (e.fat && --e.hp > 0) return;
+    if (e.isEnemy) stats.kills++;
     const k = enemies.includes(e) ? enemies : kos;
     k.splice(k.indexOf(e), 1);
     dropGun(e);
@@ -641,7 +736,7 @@ export async function play(env) {
     cam.shake = Math.max(cam.shake, byPlayer ? g.shake : 0);
     sfx(g.sound);
     if (solidAt(mx, my)) {
-      if (byPlayer) for (const e of [...enemies]) if (overlap({ x: (o.x + mx) / 2, y: (o.y + my) / 2 }, box, e, e.box)) shoot(e, deg, g.pellets > 1);
+      if (byPlayer) for (const e of [...enemies]) if (overlap({ x: (o.x + mx) / 2, y: (o.y + my) / 2 }, box, e, e.box)) bulletHit(e, deg, g.pellets > 1);
       return;
     }
     for (let i = 0; i < g.pellets; i++)
@@ -657,7 +752,7 @@ export async function play(env) {
       if (b.x >= 0 && b.y >= 0 && b.x < room.w && b.y < room.h && solidAt(b.x, b.y)) return false;
       if (b.byPlayer) {
         const e = enemies.find(e => overlap(b, ZERO, e, e.box));
-        if (e) { shoot(e, b.dir, b.shotgun); return false; }
+        if (e) { bulletHit(e, b.dir, b.shotgun); return false; }
       } else if (!p.dead && !p.exec && overlap(b, ZERO, p, box)) { killPlayer(P.deadShot, b.dir); return false; }
     }
     return true;
@@ -693,6 +788,7 @@ export async function play(env) {
     const body = blunt ? e.spr.killBlunt : e.spr.killStomp, kill = held() ? held().kill : P.stomp;
     if (!body || !kill) return;
     kos.splice(kos.indexOf(k), 1);
+    if (k.isEnemy) stats.kills++;
     const d = { x: k.x, y: k.y, angle: k.angle, sprite: body, frame: 0, imageSpeed: EXEC.imageSpeed * frames(body) / frames(kill) };
     dead.push(d);
     p.exec = { x: k.x, y: k.y, angle: k.angle + 180, sprite: kill, frame: 0, body: d };
@@ -887,13 +983,55 @@ export async function play(env) {
     e.wake = IDLE.every;
     if (p.dead || !sees(e, p)) return;
     const n = Object.assign(e.idle, { x: e.x, y: e.y, angle: e.angle, alert: true, seen: { x: p.x, y: p.y }, wait: ENEMY.recheck });
-    if (e.kind === IDLE.bag.object && bagSprite) dead.push({ x: e.x + IDLE.bag.dx, y: e.y + IDLE.bag.dy, angle: 0, sprite: bagSprite, frame: 0, imageSpeed: 0 });
+    const left = IDLE.leave[e.kind];
+    if (left && leaveSprite[e.kind]) dead.push({ x: e.x + left.dx, y: e.y + left.dy, angle: left.still ? 0 : e.angle, sprite: leaveSprite[e.kind], frame: 0, imageSpeed: 0 });
     enemies[enemies.indexOf(e)] = n;
   }
 
-  // Victim1, the factions, dogs, idle and fat enemies are ported; others stand and idle.
+  // Dodge and stun animations, and the psycho's idle, before the gang AI.
+  function stepDodger(e) {
+    if (e.sprite === e.spr.dodge) {
+      e.frame += e.frame < DODGER.hold ? DODGER.slow : DODGER.fast;
+      if (e.frame >= DODGER.end) { e.sprite = e.spr.walk; e.frame = 0; }
+      return;
+    }
+    if (e.sprite === e.spr.stunned) {
+      e.frame += DODGER.stun;
+      if (e.frame >= DODGER.stunEnd) { e.sprite = e.spr.walk; e.frame = 0; }
+      return;
+    }
+    if (e.sleep) {
+      e.frame += e.imageSpeed;
+      if (--e.wake > 0) return;
+      e.wake = DODGER.wake;
+      if (p.dead || !sees(e, p)) return;
+      Object.assign(e, { sleep: false, alert: true, seen: { x: p.x, y: p.y }, sprite: e.spr.walk, frame: 0, imageSpeed: 0, angle: pointDir(e.x, e.y, p.x, p.y) });
+    }
+    stepMafia(e);
+  }
+  // Hiding: rise and fire bursts while the player is in sight, else duck.
+  function stepHiding(e) {
+    if (e.reloading > 0) {
+      e.frame += HIDE.reload;
+      if (--e.reloading <= 0 || (e.spr.reload && e.frame >= frames(e.spr.reload))) Object.assign(e, { reloading: 0, sprite: e.spr.idle, frame: HIDE.up, ammo: HIDE.ammo });
+      return;
+    }
+    if (--e.check <= 0) { e.check = HIDE.every; e.alert = !p.dead && sees(e, p); }
+    if (!e.alert) { e.frame = Math.max(0, e.frame - HIDE.rise); return; }
+    e.angle = pointDir(e.x, e.y, p.x, p.y);
+    if (e.frame < HIDE.up) { e.frame = Math.min(HIDE.up, e.frame + HIDE.rise); return; }
+    if (--e.cooldown > 0) return;
+    e.cooldown = e.g.cooldown;
+    fire(e, e.angle, e.g, false);
+    if (--e.ammo <= 0) Object.assign(e, { reloading: HIDE.reloadSteps, sprite: e.spr.reload || e.spr.idle, frame: e.spr.reload ? 0 : HIDE.up });
+  }
+
+  // Victim1, the factions, dogs, idle, fat, dodger and hiding enemies are
+  // ported; others stand and idle.
   function stepEnemy(e) {
     if (e.idle) return stepIdle(e);
+    if (e.dodger) return stepDodger(e);
+    if (e.hiding) return stepHiding(e);
     if (e.fat && e.hp < FAT.hp && --e.bleed <= 0) { e.hp = 1; return shoot(e, e.angle); }
     if (e.mafia) return stepMafia(e);
     e.frame += e.imageSpeed;
@@ -954,7 +1092,7 @@ export async function play(env) {
   }
   function leave(lift) {
     handle.stop();
-    const carried = { x: p.x, y: p.y, weapon: p.weapon, ammo: p.ammo, elevator: lift && { x: lift.x } };
+    const carried = { x: p.x, y: p.y, weapon: p.weapon, ammo: p.ammo, elevator: lift && { x: lift.x }, stats };
     if (!env.next || !env.next(room, carried)) env.status(`${room.name} cleared: this is the last room in order.`);
   }
 
@@ -1007,6 +1145,7 @@ export async function play(env) {
   }
 
   function step() {
+    if (!p.dead) stats.steps++;
     stepPlayer();
     for (const e of [...enemies]) stepEnemy(e);
     for (const k of [...kos]) stepKO(k);
@@ -1069,6 +1208,10 @@ export async function play(env) {
     sprite(p.sprite, attacking() ? p.attackFrame : moving ? p.frame : 0, p.x, p.y, p.aim);
     cx.drawImage(over, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
     cx.restore();
+    if (cleared && exits.length + elevators.length && clearedArt) {
+      const f = clearedArt.hit.frames[0];
+      cx.drawImage(imgs.get(clearedArt.hit.atlas), f.x, f.y, f.w, f.h, Math.round((VIEW_W - f.w) / 2), VIEW_H - CLEARED.bottom, f.w, f.h);
+    }
   }
 
   // requestAnimationFrame can stall in a hidden or embedded page, so a timer
@@ -1093,7 +1236,7 @@ export async function play(env) {
 
   // Handle for tests and for stopping.
   const handle = {
-    room: room.name, player: p, keys, pressed, mouse, solids: sol, box, enemies, kos, dead, doors, weapons, bullets, exits, elevators, step, draw, leave,
+    room: room.name, stats, player: p, keys, pressed, mouse, solids: sol, box, enemies, kos, dead, doors, weapons, bullets, exits, elevators, step, draw, leave,
     stop() {
       running = false;
       removeEventListener('keydown', onKey);

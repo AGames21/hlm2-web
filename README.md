@@ -78,6 +78,23 @@ rmStripClubBackRoom (Colombians), rmJunglePlace1 (soldiers), rmBankEntrance (gua
 rmPoliceStationFloor2Part1 (police), rmSewersFloor2 (dogs), rmHenchmanLevel1Floor3 (bag).
 Still standing still: faction Fat and Idle* kinds, Hiding, Dodgers, objPrisonerPsycho, NPCs.
 
+Step 10: the remaining enemy types and the level end. The faction Fat kinds (objSoldierFatGun
+fires an MP5-like burst, `ENEMY_GUNS.FatGun`) and Idle* kinds join `FAT` and `IDLE`. Dodgers
+(objColombianDodger/objGangDodger/objSoldierDodger, `DODGER`) are unarmed chasers on the gang AI: a
+bullet or thrown weapon starts the dodge, a second one mid-dodge holds it at frame 3; melee kills.
+objPrisonerPsycho (create 0x9a9240, step 0x9a9bf0) idles on sprPrisonerIdlePsycho1-3, checks for
+the player every 15 steps, then runs as a dodger. Hiding gunners (create 0x6006c0, steps 0x6013a0
+/ 0xb3e6a0, `HIDE`) stay put, check every 8 steps, rise to frame 4, fire 24 rounds every 4 steps
+and reload. objFloorCleared (0x7b45a0 / 0x7b5240) shows sprFloorCleared once the floor is clear
+(`CLEARED`). A level ends when the next room in order has another name stem (`levelOf` in
+`web/app.js`); then `web/score.js` draws "LEVEL CLEARED" with kills and time in the game's own
+BMFont fonts (white on opaque black pages: brightness is the alpha). Guesses: a door stuns a
+dodger, one hit kills a hider, the level grouping by name, the prisoner idle carries a shotgun.
+Not ported: objFatMafiaLSD, objScoreScreen's points (combo, flexibility, mobility, boldness, time
+bonus). Test rooms: rmSonMansionFloor1 and rmJunglePlace1Hard (dodgers), rmPrisonFloor4 (psycho),
+rmHotelLobby and rmBankSideRoom (hiding), rmJunglePlace1 (fat gun), rmFansLevel1Floor2 -> score
+screen -> rmPizzaPlace.
+
 ## Run
 
 ```bash
@@ -229,5 +246,5 @@ mask `sprMask` (24×24, origin 12,12, fully solid).
 
 - The room background entries and the view fields
 - `hlm2_atlases.bin`, `collision_events`, `fonts`
-- Execution sounds, wall bounce of thrown weapons, level-end screens, the faction Fat and Idle*
-  kinds, Hiding and Dodger enemies, objPrisonerPsycho, bosses and NPCs
+- Execution sounds, wall bounce of thrown weapons, the score screen's points, objFatMafiaLSD,
+  bosses and NPCs

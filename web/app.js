@@ -5,6 +5,7 @@ import { Wad } from './agar.js';
 import * as T from './tables.js';
 import { play, musicFor } from './game.js';
 import { Audio, RemoteFile } from './audio.js';
+import { scoreScreen } from './score.js';
 
 const $ = id => document.getElementById(id);
 const DATA_WAD = 'hlm2_data_desktop.wad';
@@ -165,15 +166,40 @@ async function startPlay(name = $('room').value, carry = null) {
   $('play').textContent = 'Stop';
 }
 
+// The floors of one level share a name up to their Floor/Part number, e.g.
+// rmFansLevel1Floor1 and rmFansLevel1Floor2. This grouping is a guess from
+// the names: the game itself ends a level when the player gets back to the car.
+const levelOf = name => {
+  const n = name.replace(/Hard$/, ''), m = n.replace(/((Floor|Part|Downstairs)\d+[A-Z]?)+$/, '');
+  return m !== n ? m : n.replace(/\d+[A-Z]?$/, '');
+};
+const isHard = name => /Hard$/.test(name);
+
 // An exit was taken: play the next room in the game's room order
-// (room_goto_next). Returns false when there is none.
+// (room_goto_next). The Hard copies and test rooms that sit in the order are
+// skipped unless the run is in Hard. At the end of a level the score screen
+// shows first, and the next level starts fresh. Returns false when there is
+// no room after this one.
 function nextFloor(room, carry) {
-  const order = G.rooms.order, i = order.indexOf(room.id);
-  const next = i >= 0 && G.rooms.list.find(r => r.id === order[i + 1]);
-  if (!next) return false;
-  history.replaceState(null, '', '#' + encodeURIComponent(next.name));
-  if ([...$('room').options].some(o => o.value === next.name)) $('room').value = next.name;
-  startPlay(next.name, carry).catch(e => { status('Play failed: ' + e.message); console.error(e); });
+  const order = G.rooms.order;
+  let next = null;
+  for (let i = order.indexOf(room.id) + 1; i > 0 && i < order.length && !next; i++) {
+    const r = G.rooms.list.find(r => r.id === order[i]);
+    if (r && !/Test$/.test(r.name) && (isHard(room.name) || !isHard(r.name))) next = r;
+  }
+  const sameLevel = next && levelOf(next.name) === levelOf(room.name);
+  const go = () => {
+    if (!next) return;
+    history.replaceState(null, '', '#' + encodeURIComponent(next.name));
+    if ([...$('room').options].some(o => o.value === next.name)) $('room').value = next.name;
+    startPlay(next.name, sameLevel ? carry : null).catch(e => { status('Play failed: ' + e.message); console.error(e); });
+  };
+  if (sameLevel) { go(); return true; }
+  if (!carry?.stats?.kills) { go(); return !!next; }
+  status(`${levelOf(room.name).replace(/^rm/, '')} cleared. Click or press a key to go on.`);
+  scoreScreen(G, $('canvas'), levelOf(room.name).replace(/^rm/, '').toUpperCase(), carry.stats).then(() => {
+    if (next) go(); else status('That was the last room in order.');
+  });
   return true;
 }
 
