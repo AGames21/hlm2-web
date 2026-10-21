@@ -123,6 +123,12 @@ export const ENEMY_SWAP = {
   objEGangRandom: ['9mm', ['Uzi', 'Shotgun', '9mm']],
   objEGangStatic: ['Uzi', ['Uzi', 'Shotgun', '9mm']],
   objEGangMeleeRandom: [null, ['Knife', 'Chain', 'Pipe', 'Bat']],
+  // Faction creates 0x6063f0, 0x803990, 0x759110, 0x9ab820 (0xb44070 always
+  // keeps the Kalashnikov).
+  objColombianRandom: ['Mendoza', ['Mendoza', 'Shotgun', 'Famae', 'Silencer']],
+  objGuardRandom: ['Magnum', ['Magnum', 'Shotgun']],
+  objEPoliceRandom: [null, ['9mm', 'Shotgun']],
+  objPrisonerRandom: ['Magnum', ['Magnum', 'Shotgun']],
 };
 // Enemy guns, from 0xee5fa0's per-sprite branches: steps between shots (var
 // 65), screen shake, and bullets at 26px, aim +-spread, speed 12 + random(4).
@@ -134,7 +140,17 @@ const ENEMY_GUNS = {
   Uzi: { ...GUNS['9mm'], cooldown: 3, shake: 6, spread: 6, sound: 'sndUzi' },
   Shotgun: { ...GUNS.Shotgun, cooldown: 60, shake: 6 },
   DoubleBarrel: { ...GUNS.DoubleBarrel, cooldown: 15, shake: 6, spread: 10 },
+  Famae: { ...GUNS['9mm'], cooldown: 5, shake: 3, spread: 10, sound: 'sndFamae' },
+  Mendoza: { ...GUNS['9mm'], cooldown: 5, shake: 3, spread: 10, sound: 'sndMendoza' },
+  Magnum: { ...GUNS['9mm'], cooldown: 20, shake: 6, spread: 6, sound: 'sndMagnum' },
+  // The soldier's Kalashnikov fires a step faster than the mafia's.
+  SoldierKalashnikov: { ...GUNS['9mm'], cooldown: 4, shake: 3, spread: 10, sound: 'sndKalashnikov' },
 };
+// The Colombian, soldier, guard, police and prisoner steps (0x6064f0,
+// 0xb440f0, 0x803a80, 0x7591a0, 0x9ab9a0) are the mafia step 0x74d0b0 with
+// their own sprites (the guard's adds one early exit not read), so they all
+// run stepMafia. Their weapon is the end of the walk sprite's name.
+const FACTION = /^obj(E(Mafia|Gang|Police)|Colombian|Soldier|Guard|Prisoner)(Melee)?(Random|Patrol|Static)$/;
 // Pathfinding. The room start (0xf9bcf0) makes an mp_grid of 16px cells over
 // the room and adds, precisely, objElevator, objEditorWindow*, objFurniture
 // (and so objGlassPanel), objSolid and one object not resolved yet (global
@@ -151,9 +167,10 @@ export const PATH = { cell: 16, every: 20, speed: 2.5, rings: [1, 6, 11], angles
 // steps 0x7488c0 0x748070 0x747b00 0x749620 0x7519f0 0x751370 0x752170):
 // every 15 steps (the first after random(15)) they test the player; on sight
 // they are replaced by an alerted armed enemy at the same spot and direction.
-// IdleMoney also drops an objMoneyBag at +2, +8 (not drawn here), and the
-// silenced one sets var 15 to 12 on the new enemy (not read).
-export const IDLE = { every: 15, imageSpeed: 0.15, become: {
+// IdleMoney also drops an objMoneyBag at +2, +8 (drawn here as a still
+// sprMoneyBag; what the bag does is not read), and the silenced one sets var
+// 15 to 12 on the new enemy (not read).
+export const IDLE = { every: 15, imageSpeed: 0.15, bag: { object: 'objEGangIdleMoney', sprite: 'sprMoneyBag', dx: 2, dy: 8 }, become: {
   objEGangIdlePipe: ['objEGangMeleeRandom', 'Pipe'],
   objEGangIdleKnife: ['objEGangMeleeRandom', 'Knife'],
   objEGangIdleMoney: ['objEGangRandom'],
@@ -169,6 +186,15 @@ export const IDLE = { every: 15, imageSpeed: 0.15, become: {
 // thrown weapons not knocking them over is a guess (the player's side is not
 // read), as is the fall leaving a body that counts as dead.
 export const FAT = { hp: 5, bleed: 100 };
+// Dogs (objDogPatrol: create 0x6be760 -> objDog 0xe02560, step 0x6bf290 ->
+// 0xe02cf0). A state machine in var 31: sight is tested on a timer (var 88,
+// first random(10)); in sight the dog runs straight at the player at 4
+// (0xe01ed0), out of sight it paths to them (0x42c700) and walks the path at
+// 4; within 22px the player dies (0x1123ee0). The step animates at speed *
+// 0.1, at least 0.3 while running. Any knockout kills a dog. The calm patrol
+// (var 31 = 0) is taken to be the mafia's wander; re-checking every 10 steps
+// is a reading of the create.
+export const DOG = { recheck: 10, speed: 4, kill: 22, imageSpeed: 0.1, runImage: 0.3 };
 // Exits: objNextroom (124, step 0x939c70, player collision 0x937ad0, room
 // start 0x939700). An exit is live while no objEnemy and no objKnockedOut is
 // left; then it shows its arrow and touching it goes to the next room in the
@@ -397,7 +423,7 @@ export async function play(env) {
   }
   P.deadShot = need(pre + 'DeadShot');
   P.deadBlunt = need(pre + 'DeadBlunt') || P.deadShot;
-  const bulletSprite = need('sprBullet');
+  const bulletSprite = need('sprBullet'), bagSprite = need(IDLE.bag.sprite);
   const box = maskBox(G, pobj);
   const sol = buildSolids(G, room);
   const pg = buildPathGrid(G, room);
@@ -416,8 +442,16 @@ export async function play(env) {
     e.spr.killStomp = need(base + 'KillStomp');
     e.spr.deadShot = need(base + 'DeadMachinegun') || need(base + 'DeadShot');
     e.spr.deadShotgun = need(base + 'DeadShotgun') || e.spr.deadShot;
+    const dog = o.name === 'objDogPatrol';
+    if (dog) {
+      Object.assign(e.spr, { idle: need(base + 'Walk'), walk: need(base + 'Walk'), run: need(base + 'Run'), getUp: null,
+        deadShot: need(base + 'DeadShot'), deadBlunt: need(base + 'DeadBlunt') });
+      e.spr.deadShotgun = e.spr.deadShot;
+      Object.assign(e, { dog: true, mafia: true, gun: null, hs: 0, vs: 0, moveDir: 0, legFrame: 0, alarm: 1, check: Math.floor(random(DOG.recheck)), cooldown: 0, wait: 0, seen: null });
+      e.imageSpeed = 0;
+    }
     const fat = /^objE(Mafia|Gang)Fat$/.test(o.name);
-    const armed = /^objE(Mafia|Gang)/.test(o.name) && (fat ? 'Unarmed' : (sname.match(/Walk(\w+)$/) || [])[1]);
+    const armed = (fat || FACTION.test(o.name)) && (fat ? 'Unarmed' : (sname.match(/Walk(\w+)$/) || [])[1]);
     if (fat) {
       Object.assign(e, { fat: true, hp: FAT.hp, bleed: FAT.bleed });
       e.spr.walk = need(base + 'Walk'); e.spr.die = need(base + 'Die');
@@ -430,10 +464,11 @@ export async function play(env) {
       let held = gun ?? armed;
       const swap = ENEMY_SWAP[o.name];
       if (!gun && swap && (swap[0] === null || swap[0] === held)) held = swap[1][Math.floor(random(swap[1].length))];
-      e.mafia = true; e.gun = held; e.g = ENEMY_GUNS[held];
+      e.mafia = true; e.gun = held; e.g = ENEMY_GUNS[base.slice(3) + held] || ENEMY_GUNS[held];
       e.spr.walk = need(base + 'Walk' + held);
       e.spr.idle = e.spr.walk;
-      e.spr.attack = need(base + 'Attack' + held) || need(base + 'Attack' + held + '1');
+      // sprColombianAttackMachette is spelt so in the wad.
+      e.spr.attack = need(base + 'Attack' + held) || need(base + 'Attack' + held + '1') || (held === 'Machete' && need(base + 'AttackMachette'));
       e.spr.legs = need(base + 'Legs');
       Object.assign(e, { hs: 0, vs: 0, moveDir: 0, legFrame: 0, alarm: 1, check: Math.floor(random(ENEMY.recheck)), cooldown: 0, wait: 0, seen: null,
         still: /Static/.test(o.name) });
@@ -569,6 +604,7 @@ export async function play(env) {
     e.gun = null;
   }
   function knockOut(e, dir, sound) {
+    if (e.dog) { sfx(sound); return shoot(e, dir, false, e.spr.deadBlunt); }
     if (!e.spr.getUp || e.fat) return;
     sfx(sound);
     enemies.splice(enemies.indexOf(e), 1);
@@ -579,12 +615,12 @@ export async function play(env) {
   }
   // A bullet kills outright. The dead sprites hold several poses; picking
   // one at random is a guess.
-  function shoot(e, dir, shotgun) {
+  function shoot(e, dir, shotgun, sprite) {
     if (e.fat && --e.hp > 0) return;
     const k = enemies.includes(e) ? enemies : kos;
     k.splice(k.indexOf(e), 1);
     dropGun(e);
-    const s = (shotgun && e.spr.deadShotgun) || e.spr.deadShot;
+    const s = sprite || (shotgun && e.spr.deadShotgun) || e.spr.deadShot;
     if (e.fat) dead.push({ x: e.x, y: e.y, angle: e.angle, sprite: s, frame: 1, imageSpeed: 0 });
     else if (s) dead.push({ x: e.x, y: e.y, angle: dir, sprite: s, frame: Math.floor(random(frames(s))), imageSpeed: 0 });
     else if (e.spr.killStomp) dead.push({ x: e.x, y: e.y, angle: dir, sprite: e.spr.killStomp, frame: frames(e.spr.killStomp) - 1, imageSpeed: 0 });
@@ -739,7 +775,7 @@ export async function play(env) {
   function stepMafia(e) {
     const g = e.g;
     if (--e.check <= 0) {
-      e.check = ENEMY.recheck;
+      e.check = e.dog ? DOG.recheck : ENEMY.recheck;
       // The first shot waits one re-check (a guess at the reaction time).
       if (!p.dead && sees(e, p)) {
         if (!e.alert) e.wait = ENEMY.recheck;
@@ -794,18 +830,20 @@ export async function play(env) {
         // a wall is in the way (seen through a gap), follow a path to the
         // player, made again every 20 steps.
         e.hs = e.vs = 0;
-        if (see && d > 2 && free(sol, e.box, e.x + lenX(ENEMY.chaseSpeed, dir), e.y + lenY(ENEMY.chaseSpeed, dir))) {
+        const chase = e.dog ? DOG.speed : ENEMY.chaseSpeed;
+        if (see && d > 2 && free(sol, e.box, e.x + lenX(chase, dir), e.y + lenY(chase, dir))) {
           e.path = null;
-          e.hs = lenX(ENEMY.chaseSpeed, dir); e.vs = lenY(ENEMY.chaseSpeed, dir);
+          e.hs = lenX(chase, dir); e.vs = lenY(chase, dir);
           e.angle = dir;
         } else if (d > 2 && !p.dead) {
           if (!(--e.repath > 0)) { e.repath = PATH.every; e.path = pathTo(e, p.x, p.y); }
           followPath(e);
         }
-        if (!g && see && d < ENEMY.melee) killPlayer(P.deadBlunt, e.angle);
+        if (!g && see && d < (e.dog ? DOG.kill : ENEMY.melee)) killPlayer(P.deadBlunt, e.angle);
       }
       if (e.hs || e.vs) e.moveDir = pointDir(0, 0, e.hs, e.vs);
       e.imageSpeed = (e.hs || e.vs) ? ENEMY.wanderAnim * Math.hypot(e.hs, e.vs) : 0;
+      if (e.dog && e.spr.run) { e.sprite = e.spr.run; if (e.hs || e.vs) e.imageSpeed = Math.max(e.imageSpeed, DOG.runImage); }
     }
     // path_start moves along the path without collision checks, so a box
     // wider than the 16-px cells can clip a corner.
@@ -835,10 +873,10 @@ export async function play(env) {
   function followPath(e) {
     const path = e.path;
     if (!path) return;
-    while (path.length && dist(e, path[0]) <= PATH.speed) path.shift();
+    while (path.length && dist(e, path[0]) <= (e.dog ? DOG.speed : PATH.speed)) path.shift();
     if (!path.length) { e.path = null; return; }
-    const dir = pointDir(e.x, e.y, path[0].x, path[0].y);
-    e.hs = lenX(PATH.speed, dir); e.vs = lenY(PATH.speed, dir);
+    const dir = pointDir(e.x, e.y, path[0].x, path[0].y), speed = e.dog ? DOG.speed : PATH.speed;
+    e.hs = lenX(speed, dir); e.vs = lenY(speed, dir);
     e.angle = dir;
   }
 
@@ -849,10 +887,11 @@ export async function play(env) {
     e.wake = IDLE.every;
     if (p.dead || !sees(e, p)) return;
     const n = Object.assign(e.idle, { x: e.x, y: e.y, angle: e.angle, alert: true, seen: { x: p.x, y: p.y }, wait: ENEMY.recheck });
+    if (e.kind === IDLE.bag.object && bagSprite) dead.push({ x: e.x + IDLE.bag.dx, y: e.y + IDLE.bag.dy, angle: 0, sprite: bagSprite, frame: 0, imageSpeed: 0 });
     enemies[enemies.indexOf(e)] = n;
   }
 
-  // Victim1, the mafia, the gang, idle and fat enemies are ported; others stand and idle.
+  // Victim1, the factions, dogs, idle and fat enemies are ported; others stand and idle.
   function stepEnemy(e) {
     if (e.idle) return stepIdle(e);
     if (e.fat && e.hp < FAT.hp && --e.bleed <= 0) { e.hp = 1; return shoot(e, e.angle); }

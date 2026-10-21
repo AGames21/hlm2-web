@@ -66,7 +66,17 @@ runs straight in when it sees the player and the step is free, else follows the 
 type with the weapon they carry (`IDLE.become`). Fat enemies (objE{Gang,Mafia}Fat) have 5 HP, one
 per bullet; once hurt they bleed out after 100 steps (`FAT`). Test rooms: rmFansLevel1Floor2
 (idle smoker, path round the wall), rmFansLevel1Floor2Hard (Fat). Guesses: the Fat ignores melee
-knockouts; the idle money bag is not dropped yet.
+knockouts.
+
+Step 9: the factions. The Colombian, soldier, guard, police and prisoner Random/Patrol/Static
+steps all call the mafia step, so they run on the mafia AI (`FACTION`), with the weapon swaps
+read from their creates (`ENEMY_SWAP`) and the Famae, Mendoza, Magnum and soldier Kalashnikov
+added to `ENEMY_GUNS`. Dogs (objDogPatrol) use the same state machine with their own constants
+(`DOG`: re-check 10, run speed 4, kill within 22 px) and die to one hit. An objEGangIdleMoney
+that wakes drops sprMoneyBag at +2,+8 (`IDLE.bag`). Test rooms: rmStripClubEntrance and
+rmStripClubBackRoom (Colombians), rmJunglePlace1 (soldiers), rmBankEntrance (guards),
+rmPoliceStationFloor2Part1 (police), rmSewersFloor2 (dogs), rmHenchmanLevel1Floor3 (bag).
+Still standing still: faction Fat and Idle* kinds, Hiding, Dodgers, objPrisonerPsycho, NPCs.
 
 ## Run
 
@@ -219,5 +229,5 @@ mask `sprMask` (24×24, origin 12,12, fully solid).
 
 - The room background entries and the view fields
 - `hlm2_atlases.bin`, `collision_events`, `fonts`
-- Execution sounds, wall bounce of thrown weapons, level-end screens, the idle money bag, and every
-  enemy except objVictim1, the mafia, the gang and their Idle*/Fat kinds
+- Execution sounds, wall bounce of thrown weapons, level-end screens, the faction Fat and Idle*
+  kinds, Hiding and Dodger enemies, objPrisonerPsycho, bosses and NPCs
