@@ -79,6 +79,10 @@ Open http://127.0.0.1:8077. With a game folder given, the page fetches the wad f
 browser's IndexedDB, so each device needs it only once. To reach the server from other
 machines set `HOST=0.0.0.0`, and keep that private (LAN or Tailscale only).
 
+Online: https://agames21.github.io/hlm2-web/ (GitHub Pages, deployed from `web/` on every
+push to `main` by `.github/workflows/pages.yml`). It holds code only, so each device loads
+its own wad with **Load .wad**.
+
 ## Layout
 
 | Path | What |
