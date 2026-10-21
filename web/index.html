@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HLM2 Web</title>
+<style>
+  :root { --bg: #120914; --panel: #1f1024; --fg: #f3e9f5; --dim: #b49bbb; --hot: #ff3f8e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; height: 100vh; display: flex; flex-direction: column; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 10px 16px; background: var(--panel); border-bottom: 2px solid var(--hot); }
+  h1 { font-size: 16px; margin: 0; color: var(--hot); letter-spacing: .05em; }
+  label { color: var(--dim); display: inline-flex; gap: 6px; align-items: center; }
+  select, input[type=search] { background: var(--bg); color: var(--fg); border: 1px solid #4a2a52; border-radius: 4px; padding: 4px 6px; }
+  #room { max-width: 260px; }
+  button, .file { background: var(--hot); color: #fff; border: 0; border-radius: 4px; padding: 5px 10px; cursor: pointer; font: inherit; }
+  .file input { display: none; }
+  #status { color: var(--dim); flex: 1 1 200px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #view { flex: 1; overflow: auto; }
+  canvas { image-rendering: pixelated; display: block; margin: 16px; }
+  #intro { max-width: 560px; margin: 40px auto; padding: 0 16px; color: var(--dim); }
+  #intro b { color: var(--fg); }
+  code { color: var(--fg); }
+</style>
+</head>
+<body>
+<header>
+  <h1>HLM2 WEB</h1>
+  <label class="file">Load .wad<input id="pick" type="file" accept=".wad" multiple></label>
+  <input id="filter" type="search" placeholder="filter rooms" size="12">
+  <select id="room" disabled></select>
+  <button id="play">Play</button>
+  <label>Zoom <select id="zoom"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
+  <label><input id="hidden" type="checkbox"> hidden objects</label>
+  <span id="status">No game data loaded.</span>
+</header>
+<div id="view">
+  <div id="intro">
+    <p>This page holds no game files. Pick <b>hlm2_data_desktop.wad</b> from your own
+    Hotline Miami 2 install (<code>steamapps/common/Hotline Miami 2</code>). It is read in
+    this browser and kept in local storage, so you only pick it once per device.</p>
+    <p>For music, also pick <b>hlm2_music_desktop.wad</b> (select both files at once, or
+    add it later). It is optional.</p>
+  </div>
+  <canvas id="canvas" hidden></canvas>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

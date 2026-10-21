@@ -1,0 +1,8 @@
+# Game data and binaries: copyrighted, never commit or publish.
+_extract/
+re/
+*.wad
+*.exe
+__pycache__/
+*.bak-*
+*.bak
