@@ -10,6 +10,7 @@ import { frontEnd, card, abortMenu, STORY, progress, options } from './menu.js';
 import { youtubeEmbed } from './youtube.js';
 import { drawRoomItems } from './render.js';
 import { setupFullscreen } from './fullscreen.js';
+import { setupSettings } from './settings.js';
 
 const $ = id => document.getElementById(id);
 const DATA_WAD = 'hlm2_data_desktop.wad';
@@ -169,6 +170,7 @@ async function startPlay(name = $('room').value, carry = null, track) {
   // The player's sprites often live in shared atlases the room doesn't use.
   const load = async atlas => { if (!imgs.has(atlas)) imgs.set(atlas, await image(atlas)); };
   const env = { G, room, items, imgs, frames, load, canvas: $('canvas'), zoom: +$('zoom').value, status, carry,
+    paused: () => $('settings-dialog').open,
     restart: () => startPlay(room.name, carry, track), next: nextFloor };
   $('canvas').hidden = false;
   $('intro').hidden = true;
@@ -226,7 +228,9 @@ async function showMenu() {
   $('intro').hidden = true;
   history.replaceState(null, '', '#menu');
   status('Arrows and Enter, or the mouse. Esc goes back.');
-  const r = await frontEnd(G, $('canvas'), +$('zoom').value);
+  let r;
+  try { r = await frontEnd(G, $('canvas'), +$('zoom').value, openSettings); }
+  catch (error) { status('Menu failed to load: ' + error.message); console.error(error); return; }
   if (token !== menuToken) return;
   if (r.action === 'viewer') {
     history.replaceState(null, '', '#rmTutorialFloor1');
@@ -368,6 +372,7 @@ $('music-play').onclick = async () => {
   button.disabled = true;
   try {
     closeYouTube();
+    options.music = true; options.save();
     const a = getAudio();
     await a.ctx.resume();
     const stop = !!a.track;
@@ -391,7 +396,7 @@ $('music-track').onchange = async () => {
     $('music-status').textContent = `Playing: ${$('music-track').selectedOptions[0].textContent}`;
   } catch (e) { $('music-status').textContent = 'Music failed: ' + e.message; }
 };
-$('music-volume').oninput = e => { getAudio().mus.gain.value = +e.target.value / 100; };
+$('music-volume').oninput = e => { options.musicVolume = +e.target.value; options.save(); };
 function closeYouTube() {
   $('youtube-slot').replaceChildren();
   $('youtube-close').hidden = true;
@@ -421,8 +426,20 @@ $('youtube-form').onsubmit = async e => {
   } catch (e) { $('youtube-status').textContent = e.message; }
 };
 setupFullscreen($('canvas'), $('view'), $('fullscreen'), $('fullscreen-exit'), status);
+const applySettings = () => {
+  $('music-volume').value = options.musicVolume;
+  $('zoom').value = options.zoom;
+  const cv = $('canvas');
+  cv.style.width = cv.width * options.zoom + 'px';
+  cv.style.height = cv.height * options.zoom + 'px';
+};
+const openSettings = setupSettings($('settings-dialog'), applySettings, () => $('fullscreen').click());
+$('settings').onclick = $('fullscreen-settings').onclick = openSettings;
+addEventListener('settingschange', applySettings);
+applySettings();
 $('play').onclick = () => G && (story = null, game ? (G.audio.playMusic(null), showSelected()) : startPlay().catch(e => { status('Play failed: ' + e.message); console.error(e); }));
 addEventListener('keydown', e => {
+  if ($('settings-dialog').open) return;
   if (e.target.closest?.('input, select, textarea, button') || e.target.isContentEditable) return;
   if (e.key === 'Escape' && game) story ? showMenu() : showSelected();
   if (e.key === 'Enter' && game && story?.intro) { e.preventDefault(); startLevel(); }
@@ -430,7 +447,7 @@ addEventListener('keydown', e => {
 $('menu').onclick = () => G && showMenu();
 $('filter').oninput = () => G && fillRooms();
 $('room').onchange = showSelected;
-$('zoom').onchange = () => (game ? startPlay(game.room) : showSelected());
+$('zoom').onchange = e => { options.zoom = +e.target.value; options.save(); };
 $('hidden').onchange = showSelected;
 
 // Startup: a wad saved earlier in this browser, else one served next to the

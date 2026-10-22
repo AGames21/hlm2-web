@@ -1,6 +1,7 @@
 // Sound effects and music through WebAudio. Effects are Sounds/<name>.wav in
 // the data wad at the volume from hlm2_sounds.bin; music is
 // Music/<Name>.ogg in hlm2_music_desktop.wad, which is optional.
+import { options } from './settings.js';
 
 export class Audio {
   constructor(wad = null, table = new Map()) {
@@ -13,6 +14,8 @@ export class Audio {
     this.mus = this.ctx.createGain();
     this.mus.gain.value = 0.7;
     this.mus.connect(this.ctx.destination);
+    this.applySettings();
+    addEventListener('settingschange', () => this.applySettings());
     this.buffers = new Map();
     this.track = null;
     this.requestedMusic = null;
@@ -21,6 +24,11 @@ export class Audio {
     const wake = () => this.ctx.state === 'suspended' && this.ctx.resume();
     addEventListener('pointerdown', wake);
     addEventListener('keydown', wake);
+  }
+
+  applySettings() {
+    this.mus.gain.value = options.music ? options.musicVolume / 100 : 0;
+    this.sfx.gain.value = options.effectsVolume / 100;
   }
 
   decode(wad, file) {

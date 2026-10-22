@@ -20,15 +20,26 @@
   canvas { image-rendering: pixelated; display: block; margin: 16px; }
   [hidden] { display: none !important; }
   button:disabled { opacity: 0.5; cursor: default; }
-  :fullscreen body { height: 100dvh; }
-  :fullscreen header, :fullscreen #music-controls, :fullscreen #youtube-controls { display: none; }
-  :fullscreen #view { display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; }
-  :fullscreen canvas { margin: 0; flex-shrink: 0; width: var(--fullscreen-width) !important; height: var(--fullscreen-height) !important; }
+  #view.expanded { width: 100vw; height: 100dvh; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; }
+  #view.expanded canvas { margin: 0; flex-shrink: 0; width: var(--fullscreen-width) !important; height: var(--fullscreen-height) !important; }
   #fullscreen-exit { position: fixed; z-index: 10; right: 12px; top: 12px; opacity: 0.35; }
   #fullscreen-exit:hover, #fullscreen-exit:focus-visible { opacity: 1; }
-  :fullscreen #youtube-controls:has(iframe) { display: block; position: fixed; z-index: 5; left: 8px; bottom: 8px; padding: 0; background: transparent; }
-  :fullscreen #youtube-controls #youtube-form, :fullscreen #youtube-status { display: none; }
-  :fullscreen #youtube-player { width: 200px; margin: 0; }
+  #view.expanded #youtube-controls { display: none; }
+  #view.expanded #youtube-controls:has(iframe) { display: block; position: absolute; z-index: 5; left: 8px; bottom: 8px; padding: 0; background: transparent; }
+  #view.expanded #youtube-form, #view.expanded #youtube-status { display: none; }
+  #view.expanded #youtube-player { width: 200px; margin: 0; }
+  #fullscreen-settings { display: none; position: absolute; z-index: 10; left: 12px; top: 12px; opacity: 0.5; }
+  #view.expanded #fullscreen-settings { display: block; }
+  dialog { color: var(--fg); background: #160d20; border: 2px solid var(--hot); max-width: min(540px, 95vw); max-height: 90dvh; width: 100%; padding: 24px; }
+  dialog::backdrop { background: #000b; }
+  dialog h2 { margin-top: 0; color: var(--hot); letter-spacing: .15em; }
+  dialog nav { display: flex; gap: 8px; margin-bottom: 20px; }
+  dialog nav button[aria-pressed=true] { background: #197d87; }
+  dialog fieldset { border: 0; padding: 0; margin: 0 0 20px; }
+  dialog legend { font-weight: bold; margin-bottom: 12px; }
+  dialog label, .binding-row { display: flex; justify-content: space-between; gap: 16px; margin: 12px 0; }
+  dialog p { color: var(--dim); }
+  #settings-message { min-height: 1.5em; color: #ffe02a; }
   #music-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 16px; background: var(--panel); }
   #music-track { max-width: 220px; }
   #music-status { color: var(--dim); }
@@ -43,7 +54,6 @@
 </style>
 </head>
 <body>
-<button id="fullscreen-exit" hidden>Exit fullscreen</button>
 <header>
   <h1>HLM2 WEB</h1>
   <label class="file">Load .wad<input id="pick" type="file" accept=".wad" multiple></label>
@@ -52,6 +62,7 @@
   <button id="menu" disabled>Menu</button>
   <button id="play" disabled>Play</button>
   <button id="fullscreen" aria-pressed="false">Fullscreen</button>
+  <button id="settings">Settings</button>
   <label>Zoom <select id="zoom"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
   <label><input id="hidden" type="checkbox"> hidden objects</label>
   <span id="status">No game data loaded.</span>
@@ -62,6 +73,8 @@
   <label>Volume <input id="music-volume" type="range" min="0" max="100" value="70"></label>
   <span id="music-status" role="status">Music works without game files.</span>
 </div>
+
+<div id="view">
 <section id="youtube-controls" aria-label="YouTube soundtrack">
   <form id="youtube-form">
     <label>YouTube soundtrack <input id="youtube-url" type="url" placeholder="Paste a YouTube video or playlist link" required></label>
@@ -72,7 +85,35 @@
   <div id="youtube-slot"></div>
   <span id="youtube-status" role="status">Paste a soundtrack link, then press play in the player. No WAD needed.</span>
 </section>
-<div id="view">
+  <button id="fullscreen-exit" hidden>Exit fullscreen</button>
+  <button id="fullscreen-settings">Settings</button>
+  <dialog id="settings-dialog" aria-labelledby="settings-title">
+    <h2 id="settings-title">OPTIONS</h2>
+    <nav aria-label="Settings categories">
+      <button type="button" data-tab="audio" aria-pressed="true">Audio</button>
+      <button type="button" data-tab="video" aria-pressed="false">Video</button>
+      <button type="button" data-tab="controls" aria-pressed="false">Controls</button>
+    </nav>
+    <fieldset data-panel="audio"><legend>Audio</legend>
+      <label>Music enabled <input id="setting-music" type="checkbox"></label>
+      <label>Music volume <input id="setting-music-volume" type="range" min="0" max="100"></label>
+      <label>Sound effects <input id="setting-effects-volume" type="range" min="0" max="100"></label>
+      <p>YouTube has its own volume control in the embedded player.</p>
+    </fieldset>
+    <fieldset data-panel="video" hidden><legend>Video</legend>
+      <button id="settings-fullscreen" type="button">Enter fullscreen</button>
+      <label>Window scale <select id="setting-zoom"><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
+      <label>Screen shake <input id="setting-shake" type="checkbox"></label>
+      <p>Fullscreen fits the game to your screen. Black bars preserve its proportions.</p>
+    </fieldset>
+    <fieldset data-panel="controls" hidden><legend>Keyboard and mouse</legend>
+      <div id="key-bindings"></div>
+      <p>Click a key to change it. Arrow keys also move. Aim with the mouse; left click attacks, right click picks up or throws. Escape cancels a key change.</p>
+      <button id="settings-reset-controls" type="button">Reset controls</button>
+    </fieldset>
+    <p id="settings-message" role="status"></p>
+    <button id="settings-close" type="button">Back</button>
+  </dialog>
   <div id="intro">
     <p>This page holds no game files. Pick <b>hlm2_data_desktop.wad</b> from your own
     Hotline Miami 2 install (<code>steamapps/common/Hotline Miami 2</code>). It is read in

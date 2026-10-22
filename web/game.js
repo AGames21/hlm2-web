@@ -9,6 +9,7 @@
 // step on release, then both speeds shrink by 0.98 while |hs|+|vs| exceeds
 // walk speed + 2, which caps diagonals. animSpeed is still a guess.
 import { drawRoomItems } from './render.js';
+import { options, gameKey } from './settings.js';
 
 export const MOVE = { accel: 0.5, maxSpeed: 3, friction: 0.5, diagSlack: 2, diagScale: 0.98, animSpeed: 0.25 };
 const VIEW_W = 480, VIEW_H = 270, STEP_MS = 1000 / 60;
@@ -702,8 +703,9 @@ export async function play(env) {
   const mouse = { x: VIEW_W / 2, y: VIEW_H / 2, click: false, right: false };
   const cam = { x: 0, y: 0, shake: 0 };
   const onKey = (e) => {
+    if (env.paused?.()) return;
     if (e.type === 'keydown' && (e.target.closest?.('input, select, textarea, button') || e.target.isContentEditable)) return;
-    const k = e.key.toLowerCase();
+    const k = gameKey(e.key);
     if (!['w', 'a', 's', 'd', ' ', 'r', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) return;
     e.preventDefault();
     if (e.type === 'keydown' && !e.repeat) pressed.add(k);
@@ -1313,6 +1315,7 @@ export async function play(env) {
   }
 
   function step() {
+    if (env.paused?.()) { keys.clear(); pressed.clear(); mouse.click = mouse.right = false; return; }
     if (!p.dead) stats.steps++;
     stepPlayer();
     for (const b of [...bosses]) (b.kind === 'objPrisonBoss' ? stepPrison : stepBear)(b);
@@ -1375,7 +1378,8 @@ export async function play(env) {
 
   function draw() {
     const c = room.colour;
-    const sx = Math.round((Math.random() * 2 - 1) * cam.shake), sy = Math.round((Math.random() * 2 - 1) * cam.shake);
+    const shake = options.shake ? cam.shake : 0;
+    const sx = Math.round((Math.random() * 2 - 1) * shake), sy = Math.round((Math.random() * 2 - 1) * shake);
     cx.save();
     cx.translate(sx, sy);
     cx.fillStyle = `rgb(${c & 255},${(c >> 8) & 255},${(c >> 16) & 255})`;
@@ -1437,7 +1441,7 @@ export async function play(env) {
     next();
   };
   next();
-  env.status(`Playing ${room.name} as ${pobj.name}: WASD to move, mouse to aim, click to attack or shoot, right click to pick up or throw a weapon, Space to execute a downed enemy, R to restart. Esc or Stop to leave.`);
+  env.status(`Playing ${room.name} as ${pobj.name}: use your movement keys or arrows, mouse to aim, left click to attack, right click to pick up or throw. Change keys in Settings. Esc or Stop to leave.`);
 
   // Handle for tests and for stopping.
   const handle = {

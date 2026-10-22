@@ -98,7 +98,7 @@ screen -> rmPizzaPlace.
 Step 11: the front end and the story. `web/menu.js` plays the boot flow once (Devolver and Spike
 Chunsoft logos, the Dennaton splash, the content NOTICE) and then the title menu in the game's own
 fonts: NEW GAME, CONTINUE (scene list; scenes unlock as you finish them, kept in localStorage),
-OPTIONS (music, sensitive scenes) and LEVEL VIEWER. A story run shows the act card and the scene
+OPTIONS (audio, video, keyboard controls) and LEVEL VIEWER. A story run shows the act card and the scene
 card (fntPartPrefix / fntChapter, or the film title for the prologue), plays the scene's intro room
 (Enter skips to the level), then the level's floors in order, the score screen, and the next scene.
 Escape returns to the menu. Not yet: the title scene's palms and houses, NPCs and dialogue in intro
@@ -108,9 +108,22 @@ rooms, and the censor option's effect.
 
 For code-only development, run `node server.js` (no dependency install or build).
 Run the regression checks with `node --test tests/*.test.mjs`.
-The **Fullscreen** button enlarges the game to fit the screen, hides the toolbars,
-and preserves the image's proportions. Use the floating **Exit fullscreen** button
-or Escape to leave. A playing YouTube video stays available in a small overlay.
+The **Fullscreen** button puts the game area itself into browser fullscreen and
+enlarges the canvas while preserving its proportions. Use the floating
+**Exit fullscreen** button or Escape to leave. A playing YouTube video stays
+available in a small overlay.
+
+**OPTIONS** in the title menu and the **Settings** button open the same saved
+settings: separate music and effects volumes, music mute, fullscreen, window
+scale, screen shake, and remappable movement/execute/restart keys. The arrow
+keys also move. Gameplay pauses while Settings is open. Settings remain in this
+browser across visits; YouTube uses its own volume control. Browser fullscreen
+cannot control the operating system's menu bar or browser security overlays.
+
+The menu uses the game's fonts and scenery when available, with a readable
+fallback if those assets cannot load. This browser port does not yet reproduce
+every option or screen from the original game: controller support, editor, and
+the sensitive-scene skip behavior are not implemented.
 
 Music works without the data WAD:
 - Paste a YouTube video or playlist URL into **YouTube soundtrack**, click

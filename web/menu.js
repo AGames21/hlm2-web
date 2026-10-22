@@ -6,6 +6,8 @@
 // colour formulas are the decoded ones; positions the decode did not pin down
 // are placed by eye and say so.
 import { loadFont, drawText, textWidth } from './score.js';
+import { options } from './settings.js';
+export { options } from './settings.js';
 
 export const W = 480, H = 256;
 
@@ -49,13 +51,6 @@ export const progress = {
   get() { try { return +localStorage.getItem(SAVE) || 0; } catch { return 0; } },
   reach(i) { try { if (i > this.get()) localStorage.setItem(SAVE, i); } catch {} },
 };
-const OPTS = 'hlm2-web-options';
-export const options = (() => {
-  let o = { music: true, censor: false };
-  try { Object.assign(o, JSON.parse(localStorage.getItem(OPTS))); } catch {}
-  o.save = () => { try { localStorage.setItem(OPTS, JSON.stringify({ music: o.music, censor: o.censor })); } catch {} };
-  return o;
-})();
 
 // GameMaker colours (BGR in the exe, here as [r, g, b]).
 const C = {
@@ -77,8 +72,10 @@ function art(G, name) {
 async function sprites(G, names) {
   const out = {};
   await Promise.all(names.map(async n => {
-    const a = art(G, n);
-    if (a) out[n] = { frames: a.frames, img: await a.img };
+    try {
+      const a = art(G, n);
+      if (a) out[n] = { frames: a.frames, img: await a.img };
+    } catch (error) { console.warn('Menu art unavailable:', n, error.message); }
   }));
   return out;
 }
@@ -101,6 +98,7 @@ function tile(cx, s, alpha, ox = 0, oy = 0) {
 function input(canvas) {
   const q = [];
   const key = e => {
+    if (document.querySelector('#settings-dialog[open]')) return;
     if (e.target.closest?.('input, select, textarea, button') || e.target.isContentEditable) return;
     if (e.repeat && !/Arrow/.test(e.key)) return;
     const k = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', w: 'up', s: 'down', a: 'left', d: 'right',
@@ -290,6 +288,18 @@ function drawTitleScene(cx, a, t) {
     blit(sx, sp, it.name === 'sprHouses' ? it.frame : t / 8 + it.frame, Math.round(it.x), y);
     sx.filter = 'none';
   }
+  // Keep the title recognizable when a WAD lacks the scenery sprites.
+  if (!Object.keys(s).some(name => /sprPalm|sprHouses/.test(name))) {
+    sx.fillStyle = '#000';
+    for (let i = 0; i < 5; i++) {
+      const x = ((i * 125 - t * 0.35) % (W + 100) + W + 100) % (W + 100) - 50, y = 75 + i % 2 * 20;
+      sx.fillRect(x - 3, y, 6, H - y);
+      for (let j = 0; j < 7; j++) {
+        const angle = j * Math.PI / 3.5;
+        sx.beginPath(); sx.moveTo(x, y); sx.quadraticCurveTo(x + Math.cos(angle) * 48, y + Math.sin(angle) * 15 - 12, x + Math.cos(angle) * 58, y + Math.sin(angle) * 38 + 8); sx.lineTo(x, y + 5); sx.fill();
+      }
+    }
+  }
   for (let i = items.length - 1; i >= 0; i--) {
     const it = items[i], f = s[it.name]?.frames[0];
     if (it.x + (f?.w || 0) < -20) { items.splice(i, 1); a.add(W + 40 + Math.random() * 60, it.near); }
@@ -363,7 +373,7 @@ function pick(ev, sel, n, boxes, active = () => true) {
 }
 
 // The title menu. Resolves with { action, scene }.
-async function title(G, cx, canvas, a) {
+async function title(G, cx, canvas, a, openSettings) {
   G.audio.playMusic(options.music ? 'beams' : null);
   const [, , font, pre, option, small] = a.fonts;
   let sel = 0, screen = 'main', ssel = Math.min(progress.get(), STORY.length - 1), osel = 0, scroll = 0;
@@ -378,7 +388,7 @@ async function title(G, cx, canvas, a) {
       if (r.chose) {
         if (sel === 0) return { action: 'story', scene: 0 };
         if (sel === 1) screen = 'scenes';
-        if (sel === 2) screen = 'options';
+        if (sel === 2) openSettings ? openSettings() : screen = 'options';
         if (sel === 3) return { action: 'viewer' };
       }
     } else if (screen === 'scenes') {
@@ -467,7 +477,7 @@ export async function card(G, canvas, zoom, s, kind) {
 // The whole front end: logos, splash, notice (first visit of the page
 // only), then the title. Resolves with what the title chose.
 let booted = false;
-export async function frontEnd(G, canvas, zoom) {
+export async function frontEnd(G, canvas, zoom, openSettings) {
   const cx = setup(canvas, zoom), mine = epoch, gone = () => mine !== epoch;
   if (!booted) {
     booted = true;
@@ -477,5 +487,5 @@ export async function frontEnd(G, canvas, zoom) {
     }
   }
   const a = await titleArt(G);
-  return gone() ? { action: 'aborted' } : title(G, cx, canvas, a);
+  return gone() ? { action: 'aborted' } : title(G, cx, canvas, a, openSettings);
 }

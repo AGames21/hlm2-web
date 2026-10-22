@@ -6,13 +6,14 @@ export function fittedSize(width, height, availableWidth, availableHeight) {
 
 export function setupFullscreen(canvas, view, button, exitButton, onError) {
   const resize = () => {
-    if (!document.fullscreenElement) return;
+    if (!view.classList.contains('expanded')) return;
     const size = fittedSize(canvas.width, canvas.height, view.clientWidth, view.clientHeight);
     canvas.style.setProperty('--fullscreen-width', size.width + 'px');
     canvas.style.setProperty('--fullscreen-height', size.height + 'px');
   };
   const sync = () => {
-    const active = !!document.fullscreenElement;
+    const active = document.fullscreenElement === view;
+    view.classList.toggle('expanded', active);
     button.textContent = active ? 'Exit fullscreen' : 'Fullscreen';
     button.setAttribute('aria-pressed', String(active));
     exitButton.hidden = !active;
@@ -23,7 +24,7 @@ export function setupFullscreen(canvas, view, button, exitButton, onError) {
   button.onclick = async () => {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
-      else await document.documentElement.requestFullscreen();
+      else await view.requestFullscreen();
     } catch (error) { onError('Fullscreen unavailable: ' + error.message); }
   };
   exitButton.onclick = () => document.exitFullscreen().catch(error => onError(error.message));

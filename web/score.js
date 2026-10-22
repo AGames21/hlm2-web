@@ -5,13 +5,28 @@
 // 0x1780, 0x1770, 0x16b0 and the kill points 0xd90; only the kill points are
 // counted here, so LEVEL SCORE is the kill points alone for now.
 
-const fonts = new Map();
+const fonts = new WeakMap();
 
 // Fonts/<name>.fnt -> { chars, line, base, pages: [ImageBitmap] }
 export async function loadFont(G, name) {
-  if (fonts.has(name)) return fonts.get(name);
+  let cache = fonts.get(G.wad);
+  if (!cache) { cache = new Map(); fonts.set(G.wad, cache); }
+  if (cache.has(name)) return cache.get(name);
+  const pending = readFont(G, name).catch(error => {
+    console.warn('Using fallback font:', name, error.message);
+    const size = /Title$/.test(name) ? 36 : /Small|Subtitle/.test(name) ? 12 : /Chapter|LevelClear|Film/.test(name) ? 30 : 18;
+    const measure = new OffscreenCanvas(1, 1).getContext('2d');
+    measure.font = `bold ${size}px monospace`;
+    return { fallback: true, size, line: size * 1.2, base: size, measure };
+  });
+  cache.set(name, pending);
+  return pending;
+}
+
+async function readFont(G, name) {
   const xml = new DOMParser().parseFromString(await G.wad.slice(`Fonts/${name}.fnt`).text(), 'text/xml');
   const common = xml.querySelector('common');
+  if (!common || xml.querySelector('parsererror')) throw new Error('Unsupported bitmap font format');
   const pages = await Promise.all([...xml.querySelectorAll('page')]
     .map(pg => createImageBitmap(G.wad.slice('Fonts/' + pg.getAttribute('file')))));
   const chars = new Map();
@@ -19,8 +34,8 @@ export async function loadFont(G, name) {
     const n = k => +c.getAttribute(k);
     chars.set(n('id'), { x: n('x'), y: n('y'), w: n('width'), h: n('height'), ox: n('xoffset'), oy: n('yoffset'), adv: n('xadvance'), page: n('page') });
   }
+  if (!chars.size || !pages.length) throw new Error('Bitmap font has no glyphs or image pages');
   const f = { chars, line: +common.getAttribute('lineHeight'), base: +common.getAttribute('base'), pages, tints: new Map() };
-  fonts.set(name, f);
   return f;
 }
 
@@ -43,6 +58,7 @@ function tinted(f, page, colour) {
 }
 
 export function textWidth(f, s) {
+  if (f.fallback) return f.measure.measureText(s).width;
   let w = 0;
   for (const ch of s) w += f.chars.get(ch.codePointAt(0))?.adv ?? 0;
   return w;
@@ -50,6 +66,13 @@ export function textWidth(f, s) {
 
 // align: 0 left, 0.5 centre, 1 right. y is the top of the line.
 export function drawText(cx, f, s, x, y, { align = 0, colour = '#fff', scale = 1 } = {}) {
+  if (f.fallback) {
+    cx.save();
+    cx.font = `bold ${f.size * scale}px monospace`;
+    cx.fillStyle = colour; cx.textBaseline = 'top';
+    cx.fillText(s, x - textWidth(f, s) * scale * align, y);
+    cx.restore(); return;
+  }
   let at = x - textWidth(f, s) * scale * align;
   for (const ch of s) {
     const g = f.chars.get(ch.codePointAt(0));
