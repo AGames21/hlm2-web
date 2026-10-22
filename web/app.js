@@ -256,7 +256,7 @@ async function runScene(i) {
   if (room) {
     story = { i, intro: true };
     await startPlay(room.name, null, s.introTrack);
-    status(`${s.scene} ${s.title}: ${room.name}. Walk out, or press Enter to go to the level. Esc for the menu.`);
+    status(`${s.scene} ${s.title}: intro-room preview. Scripted dialogue is not implemented yet. Enter starts the level; Esc returns to the menu.`);
   } else startLevel();
 }
 
@@ -434,6 +434,15 @@ const applySettings = () => {
   cv.style.height = cv.height * options.zoom + 'px';
 };
 const openSettings = setupSettings($('settings-dialog'), applySettings, () => $('fullscreen').click());
+$('settings-report').onclick = () => {
+  const report = { version: 'combat-state-2026-10-22', date: new Date().toISOString(), game: game?.diagnostics() || null,
+    selectedRoom: $('room').value, story: story && { ...story }, gameDataLoaded: !!G };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }));
+  const link = document.createElement('a');
+  link.href = url; link.download = 'hlm2-bug-report.json'; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  $('settings-message').textContent = 'Bug report saved. It contains room and combat state, with no WAD files.';
+};
 $('settings').onclick = $('fullscreen-settings').onclick = openSettings;
 addEventListener('settingschange', applySettings);
 applySettings();

@@ -508,8 +508,9 @@ export async function play(env) {
   const art = new Map();
   const need = (name) => {
     const s = sprByName.get(name), hit = s && env.frames(name);
-    if (hit) art.set(name, { s, hit });
-    return hit ? name : null;
+    if (!hit?.frames.length) return null;
+    art.set(name, { s, hit });
+    return name;
   };
   const walkName = G.sprites.get(pobj.sprite).name, pre = walkName.replace(/Walk\w*$/, '');
   const P = {
@@ -693,7 +694,7 @@ export async function play(env) {
   if (lift) { carry.x = lift.to.x; carry.y = lift.to.y; }
   const at = carry ? nearestFree(sol, box, carry.x, carry.y)
     : nearestFree(sol, box, spawn ? spawn.x : bossEnter ? bossEnter.x : room.w >> 1, spawn ? spawn.y : bossEnter ? bossEnter.y : room.h >> 1, clear);
-  const p = { x: at.x, y: at.y, hs: 0, vs: 0, aim: 0, dir: 0, frame: 0, sprite: P.walk, attackFrame: 0, cooldown: 0, weapon: null, exec: null,
+  const p = { x: at.x, y: at.y, hs: 0, vs: 0, aim: 0, dir: 0, frame: 0, sprite: P.walk, attack: null, attackFrame: 0, cooldown: 0, weapon: null, exec: null,
     ammo: 0, barrel: -1, dead: null };
   if (carry && arm[carry.weapon]) { p.weapon = carry.weapon; p.ammo = carry.ammo; p.sprite = arm[carry.weapon].walk; }
   // The exit the player arrives on stays off until they step off it.
@@ -731,10 +732,11 @@ export async function play(env) {
   canvas.style.height = VIEW_H * zoom + 'px';
   const cx = canvas.getContext('2d');
 
-  const frames = (name) => art.get(name).hit.frames.length;
+  const frames = (name) => art.get(name)?.hit.frames.length || 1;
   const held = () => p.weapon && arm[p.weapon];
   const walkSprite = () => held() ? held().walk : P.walk;
-  const attacking = () => p.sprite === P.punch || (held() && (p.sprite === held().attack || p.sprite === held().attack2));
+  // Combat state must not depend on whether a particular animation exists.
+  const attacking = () => !!p.attack;
   const solidAt = (x, y) => {
     const xx = Math.round(x), yy = Math.round(y);
     return xx < 0 || yy < 0 || xx >= sol.w || yy >= sol.h || sol.grid[yy * sol.w + xx] === 1;
@@ -762,12 +764,14 @@ export async function play(env) {
       return;
     }
     if (e.dog || e.dodger || e.hiding) { sfx(sound); return shoot(e, dir, false, e.spr.deadBlunt); }
-    if (!e.spr.getUp || e.fat) return;
+    if (e.fat) return;
     sfx(sound);
     enemies.splice(enemies.indexOf(e), 1);
     dropGun(e);
-    kos.push({ obj: e.obj, isEnemy: e.isEnemy, x: e.x, y: e.y, dir, speed: random(KO.speedRand) + KO.speedMin, angle: dir, sprite: e.spr.getUp, spr: e.spr,
-      frame: 1, imageSpeed: 0, alarm: Math.floor(random(KO.waitRand)) + KO.waitMin, box: e.box, gun: e.gun });
+    const sprite = e.spr.getUp || e.spr.idle || e.sprite || e.spr.walk;
+    kos.push({ obj: e.obj, isEnemy: e.isEnemy, x: e.x, y: e.y, dir, speed: random(KO.speedRand) + KO.speedMin, angle: dir, sprite, spr: e.spr,
+      frame: Math.min(1, frames(sprite) - 1), imageSpeed: 0, alarm: Math.floor(random(KO.waitRand)) + KO.waitMin, box: e.box, gun: e.gun,
+      fallbackPose: !e.spr.getUp });
     cam.shake = KO.shake;
   }
   // A dodger hit by a bullet or a thrown weapon starts its dodge, or holds it.
@@ -858,20 +862,21 @@ export async function play(env) {
     const k = kos.find(k => overlap(p, reach, k, k.box));
     if (!k) return;
     const e = k, blunt = held() && held().kill !== P.stomp;
-    const body = blunt ? e.spr.killBlunt : e.spr.killStomp, kill = held() ? held().kill : P.stomp;
-    if (!body || !kill) return;
+    const body = (blunt ? e.spr.killBlunt : e.spr.killStomp) || e.spr.deadShot || e.sprite;
+    const animation = (held() ? held().kill : P.stomp), kill = animation || P.punch || P.walk;
+    const duration = animation ? frames(animation) : 6;
     kos.splice(kos.indexOf(k), 1);
     if (k.isEnemy) { stats.kills++; award(POINTS.exec, k.x, k.y); }
-    const d = { x: k.x, y: k.y, angle: k.angle, sprite: body, frame: 0, imageSpeed: EXEC.imageSpeed * frames(body) / frames(kill) };
+    const d = { x: k.x, y: k.y, angle: k.angle, sprite: body, frame: 0, imageSpeed: EXEC.imageSpeed * frames(body) / duration };
     dead.push(d);
-    p.exec = { x: k.x, y: k.y, angle: k.angle + 180, sprite: kill, frame: 0, body: d };
+    p.exec = { x: k.x, y: k.y, angle: k.angle + 180, sprite: kill, frame: 0, duration, body: d };
     p.x = k.x; p.y = k.y; p.hs = p.vs = 0;
   }
   function stepExec() {
     const x = p.exec;
     x.frame += EXEC.imageSpeed;
     x.body.frame = Math.min(x.body.frame + x.body.imageSpeed, frames(x.body.sprite) - 1);
-    if (x.frame < frames(x.sprite)) return;
+    if (x.frame < x.duration) return;
     x.body.frame = frames(x.body.sprite) - 1;
     x.body.imageSpeed = 0;
     let px = x.x, py = x.y;
@@ -923,20 +928,23 @@ export async function play(env) {
           p.barrel = -p.barrel;
           p.sprite = a.side !== undefined && p.barrel < 0 ? a.attack2 : a.attack;
           p.attackFrame = a.startFrame || 0; p.cooldown = a.cooldown;
+          p.attack = { frames: frames(p.sprite), gun: true, imageSpeed: a.imageSpeed };
           fire(p, aimDeg(), a, true, a.side !== undefined ? p.barrel : 0);
         }
-      } else if (a || P.punch) {
-        p.sprite = a ? a.attack : P.punch; p.attackFrame = a ? a.frame : MELEE.startFrame; p.cooldown = MELEE.cooldown;
+      } else {
+        p.sprite = a ? a.attack : P.punch || P.walk;
+        p.attack = { frames: (a || P.punch) ? frames(p.sprite) : Math.ceil(MELEE.cooldown * MELEE.imageSpeed), gun: false, imageSpeed: MELEE.imageSpeed };
+        p.attackFrame = a ? a.frame : MELEE.startFrame; p.cooldown = MELEE.cooldown;
         sfx(SOUND.swing[Math.floor(random(2))]);
       }
     }
     mouse.click = false;
     if (attacking()) {
       const reach = { x: p.x + MELEE.reach * Math.cos(p.aim), y: p.y + MELEE.reach * Math.sin(p.aim) };
-      if (!held()?.gun) for (const e of [...enemies])
+      if (!p.attack.gun) for (const e of [...enemies])
         if (overlap(p, box, e, e.box) || overlap(reach, box, e, e.box)) knockOut(e, pointDir(p.x, p.y, e.x, e.y), held() ? SOUND.hit : SOUND.punch);
-      p.attackFrame += held()?.gun ? held().imageSpeed : MELEE.imageSpeed;
-      if (p.attackFrame >= frames(p.sprite)) { p.sprite = walkSprite(); p.attackFrame = 0; }
+      p.attackFrame += p.attack.imageSpeed;
+      if (p.attackFrame >= p.attack.frames) { p.attack = null; p.sprite = walkSprite(); p.attackFrame = 0; }
     }
   }
 
@@ -1176,7 +1184,10 @@ export async function play(env) {
       const mx = moveAxis(sol, k.box, k, 'x', lenX(k.speed, k.dir)), my = moveAxis(sol, k.box, k, 'y', lenY(k.speed, k.dir));
       k.speed = (mx || my) ? Math.max(0, k.speed - KO.friction) : 0;
     }
-    if (k.alarm > 0 && --k.alarm === 0) k.imageSpeed = KO.getUpSpeed;
+    if (k.alarm > 0) {
+      if (--k.alarm > 0) return;
+      k.imageSpeed = KO.getUpSpeed;
+    }
     k.frame += k.imageSpeed;
     if (k.frame >= frames(k.sprite)) {
       kos.splice(kos.indexOf(k), 1);
@@ -1268,7 +1279,7 @@ export async function play(env) {
   // player (toward the boss) is inside the player's mask.
   function bossHit(b, reach) {
     const back = -p.aim / RAD + 180, at = { x: b.x + lenX(reach, back), y: b.y + lenY(reach, back) };
-    return attacking() && !held()?.gun && inBox(at, p, box);
+    return attacking() && !p.attack.gun && inBox(at, p, box);
   }
   function bossDies(b, sprite, speed, friction) {
     bosses.splice(bosses.indexOf(b), 1);
@@ -1388,7 +1399,7 @@ export async function play(env) {
     for (const d of dead) sprite(d.sprite, d.frame, d.x, d.y, -d.angle * RAD);
     for (const q of pieces) sprite(BURST.piece, 0, q.x, q.y, -q.angle * RAD);
     for (const l of elevators) sprite(l.sprite, Math.floor(l.frame), l.x, l.y, 0);
-    for (const k of kos) sprite(k.sprite, k.frame, k.x, k.y, -k.angle * RAD);
+    for (const k of kos) sprite(k.sprite, k.frame, k.x, k.y, -(k.angle + (k.fallbackPose ? 90 : 0)) * RAD);
     for (const w of weapons) sprite(w.sprite, 0, w.x, w.y, -w.angle * RAD);
     for (const d of doors) sprite(d.sprite, 0, d.x, d.y, -d.angle * RAD);
     for (const e of enemies) {
@@ -1440,12 +1451,31 @@ export async function play(env) {
     draw();
     next();
   };
-  next();
+  if (env.autostart !== false) next();
   env.status(`Playing ${room.name} as ${pobj.name}: use your movement keys or arrows, mouse to aim, left click to attack, right click to pick up or throw. Change keys in Settings. Esc or Stop to leave.`);
 
   // Handle for tests and for stopping.
   const handle = {
     room: room.name, stats, cam, player: p, keys, pressed, mouse, solids: sol, box, enemies, bosses, kos, dead, doors, weapons, bullets, exits, elevators, step, draw, leave,
+    diagnostics() {
+      return {
+        room: room.name, character: pobj.name, running, paused: !!env.paused?.(),
+        player: { x: p.x, y: p.y, sprite: p.sprite, weapon: p.weapon, ammo: p.ammo, attack: p.attack, attackFrame: p.attackFrame, cooldown: p.cooldown, executing: !!p.exec, dead: !!p.dead },
+        input: { keys: [...keys], pressed: [...pressed], mouse: { ...mouse } },
+        playerAnimations: { ...P },
+        frameCounts: Object.fromEntries([...art].map(([name, value]) => [name, value.hit.frames.length])),
+        roomObjects: [...new Set(room.insts.map(instance => instance.obj))].map(id => {
+          const object = G.objects.get(id), parents = [];
+          for (let parent = G.objects.get(object?.parent), depth = 0; parent && depth < 64; parent = G.objects.get(parent.parent), depth++) parents.push(parent.name);
+          return { id, name: object?.name, sprite: G.sprites.get(object?.sprite)?.name, parents };
+        }),
+        roomInstances: room.insts.map(instance => ({ id: instance.id, obj: instance.obj, x: instance.x, y: instance.y })),
+        targets: enemies.map(e => ({ kind: e.kind, obj: e.obj, x: e.x, y: e.y, sprite: e.sprite, animations: { ...e.spr }, isEnemy: e.isEnemy })),
+        downed: kos.map(k => ({ obj: k.obj, x: k.x, y: k.y, sprite: k.sprite, alarm: k.alarm, fallbackPose: k.fallbackPose })),
+        counts: { enemies: enemies.length, downed: kos.length, dead: dead.length, bosses: bosses.length },
+        stats: { ...stats },
+      };
+    },
     stop() {
       running = false;
       removeEventListener('keydown', onKey);

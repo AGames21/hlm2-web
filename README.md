@@ -108,6 +108,11 @@ rooms, and the censor option's effect.
 
 For code-only development, run `node server.js` (no dependency install or build).
 Run the regression checks with `node --test tests/*.test.mjs`.
+These include mouse-input combat and floor handoff checks using synthetic room
+and sprite metadata. Knockouts, attacks, and executions now keep their gameplay
+state even if a particular animation is absent; fallback poses do not reproduce
+the missing original animations. **Settings → Save bug report** exports the
+current room and combat state for diagnosing unsupported actors.
 The **Fullscreen** button puts the game area itself into browser fullscreen and
 enlarges the canvas while preserving its proportions. Use the floating
 **Exit fullscreen** button or Escape to leave. A playing YouTube video stays
@@ -124,6 +129,8 @@ The menu uses the game's fonts and scenery when available, with a readable
 fallback if those assets cannot load. This browser port does not yet reproduce
 every option or screen from the original game: controller support, editor, and
 the sensitive-scene skip behavior are not implemented.
+Original scripted cutscenes and dialogue are also unfinished; see
+[story/cutscene status and required REA files](docs/cutscene-status.md).
 
 Music works without the data WAD:
 - Paste a YouTube video or playlist URL into **YouTube soundtrack**, click
