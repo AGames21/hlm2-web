@@ -170,9 +170,14 @@ async function punchAndFinish(page) {
       assert.match(await page.locator('#settings-message').textContent(), /already assigned/);
       await page.keyboard.press('i'); await page.getByRole('button', { name: 'Move up: I', exact: true }).waitFor();
       await page.locator('#settings-close').click();
+      assert.equal(await page.evaluate(() => document.activeElement.id), 'canvas', 'closing Settings must return game focus immediately');
       const y = await page.evaluate(() => window.game.player.y);
-      await page.keyboard.down('i'); await delay(120); await page.keyboard.up('i');
-      assert(await page.evaluate(start => window.game.player.y < start - 2, y));
+      await page.keyboard.down('i');
+      try {
+        await page.waitForFunction(start => window.game.player.y < start - 2, y, { timeout: 1500 });
+      } catch (error) {
+        throw new Error(`${error.message}; input state: ${JSON.stringify(await page.evaluate(() => ({ focus: document.activeElement.id, ...window.game.diagnostics() })))}`);
+      } finally { await page.keyboard.up('i'); }
       assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('hlm2-web-options')).effectsVolume), 25);
     });
     await check('Fullscreen fills the screen, resizes, and retains working options', async () => {

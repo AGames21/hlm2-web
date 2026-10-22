@@ -31,7 +31,7 @@ export function gameKey(key, bindings = options.bindings) {
   return action ? defaultBindings[action] : null;
 }
 
-export function setupSettings(dialog, onChange, toggleFullscreen) {
+export function setupSettings(dialog, onChange, toggleFullscreen, onClose = () => {}) {
   const $ = id => document.getElementById(id);
   let binding = null;
   const labels = { up: 'Move up', down: 'Move down', left: 'Move left', right: 'Move right', execute: 'Execute', restart: 'Restart room' };
@@ -78,8 +78,10 @@ export function setupSettings(dialog, onChange, toggleFullscreen) {
     dialog.querySelector(`[data-action="${action}"]`).focus();
   }, true);
   $('settings-reset-controls').onclick = () => { options.bindings = { ...defaultBindings }; binding = null; changed(); };
-  $('settings-close').onclick = () => dialog.close();
-  dialog.addEventListener('close', () => { binding = null; });
+  const close = () => { dialog.close(); onClose(); };
+  $('settings-close').onclick = close;
+  dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
+  dialog.addEventListener('close', () => { binding = null; onClose(); });
   $('settings-fullscreen').onclick = toggleFullscreen;
   document.addEventListener('fullscreenchange', sync);
   globalThis.addEventListener('settingschange', sync);

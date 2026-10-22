@@ -517,7 +517,8 @@ const applySettings = () => {
   cv.style.width = cv.width * options.zoom + 'px';
   cv.style.height = cv.height * options.zoom + 'px';
 };
-const openSettings = setupSettings($('settings-dialog'), applySettings, () => $('fullscreen').click());
+const focusGame = () => { if (!$('canvas').hidden) $('canvas').focus({ preventScroll: true }); };
+const openSettings = setupSettings($('settings-dialog'), applySettings, () => $('fullscreen').click(), focusGame);
 $('settings-report').onclick = () => {
   const report = { version: 'combat-state-2026-10-22', date: new Date().toISOString(), game: game?.diagnostics() || null,
     selectedRoom: $('room').value, story: story && { ...story }, gameDataLoaded: !!G };
@@ -528,9 +529,6 @@ $('settings-report').onclick = () => {
   $('settings-message').textContent = 'Bug report saved. It contains room and combat state, with no WAD files.';
 };
 $('settings').onclick = $('fullscreen-settings').onclick = openSettings;
-$('settings-dialog').addEventListener('close', () => {
-  if (!$('canvas').hidden) $('canvas').focus({ preventScroll: true });
-});
 addEventListener('settingschange', applySettings);
 applySettings();
 $('play').onclick = () => G && (story = null, game ? (G.audio.playMusic(null), showSelected()) : startPlay().catch(e => { status('Play failed: ' + e.message); console.error(e); }));
