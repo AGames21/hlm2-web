@@ -50,6 +50,30 @@ export const GUNS = {
   Shotgun: { ammo: 6, imageSpeed: 0.5, cooldown: 30, shake: 6, pellets: 8, spread: 6, speed: 12, speedRand: 4, muzzle: 26, sound: 'sndShotgun' },
   DoubleBarrel: { ammo: 2, imageSpeed: 0.35, startFrame: 1, cooldown: 12, shake: 4, pellets: 12, spread: 8, speed: 10, speedRand: 2, muzzle: 24, side: 6, sound: 'sndDoubleBarrel' },
 };
+// The Fans, picked on objMaskMenu (menu.js MASKS). Their sprites are named
+// like the Pig's except as listed: `punch` cycles through attack sprites,
+// `stomp` is the execution, `noPickup` makes right click do nothing.
+// Tony (objPlayerTiger): punches kill and he takes no weapons (known game
+// behaviour; his handlers are not read).
+// Corey (objPlayerZebra): space handler 0xa29490 rolls when not rolling and
+// the cooldown (var 0x492) is out: sprZebraRoll, cooldown 30, counted down
+// each step. The bullet collision 0xab5400 ignores bullets while the sprite
+// is sprZebraRoll below image_index 19, so the whole roll. Roll speed and
+// image speed are not decoded (guesses). A body in reach is executed first.
+// Alex & Ash (objPlayerSwanChainsaw): the chainsaw kills (guess, as Tony);
+// Ash's gun follower is not ported.
+// Mark (objPlayerBear): right click 0xa18ff0 sets var 0x7e (taken to be the
+// arm spread) while he walks with his special sprites; otherwise the normal
+// pickup. Body sprBearWalkSpecial plus two sprBearArm. The MP5 stats, the
+// 64 rounds (alarms 1/2 use 64), the shoulder offset and spreading the arms
+// to the sides are guesses.
+export const FANS = {
+  objPlayerTiger: { lethal: true, noPickup: true, punch: ['AttackPunch1', 'AttackPunch2'], stomp: 'Kill' },
+  objPlayerZebra: { stomp: 'KillBash', roll: { sprite: 'sprZebraRoll', cooldown: 30, invulnerable: 19, speed: 4, imageSpeed: 0.5 } },
+  objPlayerSwanChainsaw: { lethal: true, noPickup: true, punch: ['AttackChainsaw'], stomp: 'KillChainsaw1' },
+  objPlayerBear: { stomp: 'Stomp', special: { walk: 'sprBearWalkSpecial', arm: 'sprBearArm', shoulder: 9, flash: 3, label: 'MP5 x2',
+    gun: { ammo: 64, imageSpeed: 0, cooldown: 4, shake: 3, pellets: 1, spread: 6, speed: 12, speedRand: 4, muzzle: 33, sound: 'sndMP5' } } },
+};
 // objBullet (147): flies straight and is destroyed on a wall (0x54f550) or
 // 100px outside the room (step 0x550bd0). Hitting an enemy kills it outright
 // (Enemy_col_bullet 0x762a60, not decoded: the dead sprite choice is a guess).
@@ -503,7 +527,8 @@ export async function play(env) {
   // (the bear's step sets sprSonWalkUnarmed). Otherwise the Pig.
   const byName = n => n && G.objects.list.find(o => o.name === n);
   const bossWho = room.insts.map(i => BOSS_WHO[G.objects.get(i.obj)?.name]).find(Boolean);
-  const pobj = spawn ? G.objects.get(spawn.obj) : byName(bossWho) || byName('objPigButcher');
+  const pobj = spawn ? G.objects.get(spawn.obj) : byName(env.character) || byName(bossWho) || byName('objPigButcher');
+  const fan = FANS[pobj.name];
   const sprByName = new Map(G.sprites.list.map(s => [s.name, s]));
   const art = new Map();
   const need = (name) => {
@@ -516,9 +541,10 @@ export async function play(env) {
   const P = {
     walk: need(walkName),
     legs: need(pre + 'Legs'),
-    punch: need(pre + 'AttackPunch'),
-    stomp: need(pre + 'KillStomp'),
+    punches: (fan?.punch || ['AttackPunch']).map(n => need(pre + n)).filter(Boolean),
+    stomp: need(pre + 'KillStomp') || (fan && need(pre + fan.stomp)),
   };
+  P.punch = P.punches[0];
   // Per weapon: walk, attack and execution sprites, if the character has them.
   const arm = {};
   for (const [name, a] of Object.entries(ARMS)) {
@@ -530,7 +556,13 @@ export async function play(env) {
     const attack = need(pre + 'Attack' + name) || need(pre + 'Attack' + name + '1');
     if (walk && attack) arm[name] = { ...g, gun: true, walk, attack, attack2: need(pre + 'Attack' + name + '2') || attack, kill: P.stomp };
   }
-  P.deadShot = need(pre + 'DeadShot') || need(pre + 'DeadShotgun');
+  if (fan?.special) {
+    const s = fan.special;
+    arm.Special = { ...s.gun, gun: true, special: true, label: s.label, walk: need(s.walk), attack: s.walk, attack2: s.walk, kill: P.stomp };
+    P.arm = need(s.arm);
+  }
+  if (fan?.roll) P.roll = need(fan.roll.sprite);
+  P.deadShot = need(pre + 'DeadShot') || need(pre + 'DeadShotgun') || need(pre + 'DeadMachinegun');
   P.deadBlunt = need(pre + 'DeadBlunt') || P.deadShot;
   const bulletSprite = need('sprBullet'), clearedArt = art.get(need(CLEARED.sprite)), leaveSprite = Object.fromEntries(Object.entries(IDLE.leave).map(([k, v]) => [k, need(v.sprite)]));
   const box = maskBox(G, pobj);
@@ -696,8 +728,9 @@ export async function play(env) {
   const at = carry ? nearestFree(sol, box, carry.x, carry.y)
     : nearestFree(sol, box, spawn ? spawn.x : bossEnter ? bossEnter.x : room.w >> 1, spawn ? spawn.y : bossEnter ? bossEnter.y : room.h >> 1, clear);
   const p = { x: at.x, y: at.y, hs: 0, vs: 0, aim: 0, dir: 0, frame: 0, sprite: P.walk, attack: null, attackFrame: 0, cooldown: 0, weapon: null, exec: null,
-    ammo: 0, barrel: -1, dead: null };
+    ammo: 0, barrel: -1, dead: null, roll: null, rollCool: 0, spread: false, flash: 0, punch: 0 };
   if (carry && arm[carry.weapon]) { p.weapon = carry.weapon; p.ammo = carry.ammo; p.sprite = arm[carry.weapon].walk; }
+  else if (!carry && arm.Special) { p.weapon = 'Special'; p.ammo = arm.Special.ammo; p.sprite = arm.Special.walk; }
   // The exit the player arrives on stays off until they step off it.
   for (const x of exits) x.off = overlap(p, box, x, x.box);
   for (const l of elevators) l.used = overlap(p, box, l, l.box);
@@ -837,7 +870,7 @@ export async function play(env) {
       if (b.byPlayer) {
         const e = enemies.find(e => overlap(b, ZERO, e, e.box));
         if (e) { bulletHit(e, b.dir, b.shotgun); return false; }
-      } else if (!p.dead && !p.exec && overlap(b, ZERO, p, box)) { killPlayer(P.deadShot, b.dir); return false; }
+      } else if (!p.dead && !p.exec && !(p.roll && p.roll.frame < fan.roll.invulnerable) && overlap(b, ZERO, p, box)) { killPlayer(P.deadShot, b.dir); return false; }
     }
     return true;
   }
@@ -867,7 +900,7 @@ export async function play(env) {
   function execute() {
     const reach = scaleBox(box, EXEC.scale);
     const k = kos.find(k => overlap(p, reach, k, k.box));
-    if (!k) return;
+    if (!k) return false;
     const e = k, blunt = held() && held().kill !== P.stomp;
     const body = (blunt ? e.spr.killBlunt : e.spr.killStomp) || e.spr.deadShot || e.sprite;
     const animation = (held() ? held().kill : P.stomp), kill = animation || P.punch || P.walk;
@@ -878,6 +911,25 @@ export async function play(env) {
     dead.push(d);
     p.exec = { x: k.x, y: k.y, angle: k.angle + 180, sprite: kill, frame: 0, duration, body: d };
     p.x = k.x; p.y = k.y; p.hs = p.vs = 0;
+    return true;
+  }
+  // Corey's roll: straight along the way he moves (or aims), bullets pass.
+  function stepRoll() {
+    const r = p.roll;
+    moveAxis(sol, box, p, 'x', Math.cos(r.dir) * fan.roll.speed);
+    moveAxis(sol, box, p, 'y', Math.sin(r.dir) * fan.roll.speed);
+    p.dir = r.dir;
+    r.frame += fan.roll.imageSpeed;
+    if (r.frame >= frames(P.roll)) { p.roll = null; p.hs = Math.cos(r.dir) * MOVE.maxSpeed; p.vs = Math.sin(r.dir) * MOVE.maxSpeed; }
+  }
+  // Mark's arms: shoulders either side of the body, each aimed at the cursor,
+  // or straight out to its side when spread. GameMaker degrees.
+  function bearArms() {
+    const a = aimDeg(), mx = mouse.x + cam.x, my = mouse.y + cam.y;
+    return [-1, 1].map(side => {
+      const x = p.x + lenX(fan.special.shoulder, a + side * 90), y = p.y + lenY(fan.special.shoulder, a + side * 90);
+      return { side, x, y, deg: p.spread ? a + side * 90 : pointDir(x, y, mx, my) };
+    });
   }
   function stepExec() {
     const x = p.exec;
@@ -913,6 +965,9 @@ export async function play(env) {
     if (p.exec) { stepExec(); mouse.click = mouse.right = false; return; }
     if (p.ride) { p.hs = p.vs = 0; mouse.click = mouse.right = false; return; }
     if (p.locked) { p.hs = p.vs = 0; mouse.click = mouse.right = false; pressed.clear(); return; }
+    if (p.rollCool > 0) p.rollCool--;
+    if (p.flash > 0) p.flash--;
+    if (p.roll) { stepRoll(); mouse.click = mouse.right = false; return; }
     const ix = (keys.has('d') || keys.has('arrowright')) - (keys.has('a') || keys.has('arrowleft'));
     const iy = (keys.has('s') || keys.has('arrowdown')) - (keys.has('w') || keys.has('arrowup'));
     p.hs = ix ? approach(p.hs, ix * MOVE.maxSpeed, MOVE.accel) : approach(p.hs, 0, MOVE.friction);
@@ -923,12 +978,32 @@ export async function play(env) {
     if (p.hs || p.vs) { p.dir = Math.atan2(p.vs, p.hs); p.frame += MOVE.animSpeed; }
 
     if (p.cooldown > 0) p.cooldown--;
-    if (mouse.right) pickupOrThrow();
+    if (mouse.right && !fan?.noPickup) {
+      // Mark spreads his arms while the MP5s have rounds; empty, he drops them.
+      if (p.weapon === 'Special' && p.ammo > 0) p.spread = !p.spread;
+      else {
+        if (p.weapon === 'Special') { p.weapon = null; p.spread = false; }
+        pickupOrThrow();
+      }
+    }
     mouse.right = false;
-    if (pressed.has(' ') && !attacking()) execute();
+    if (pressed.has(' ') && !attacking() && !execute() && fan?.roll && p.rollCool <= 0) {
+      p.roll = { frame: 0, dir: p.hs || p.vs ? Math.atan2(p.vs, p.hs) : p.aim };
+      p.rollCool = fan.roll.cooldown;
+      return;
+    }
     if (mouse.click && !(p.cooldown > 0) && !attacking() && !p.exec) {
       const a = held();
-      if (a && a.gun) {
+      if (a?.special) {
+        // Mark fires one arm at a time, from its hand; the body keeps walking.
+        if (p.ammo > 0) {
+          p.ammo--;
+          p.barrel = -p.barrel;
+          p.cooldown = a.cooldown; p.flash = fan.special.flash;
+          const s = bearArms().find(s => s.side === p.barrel);
+          fire(s, s.deg, a, true);
+        }
+      } else if (a && a.gun) {
         // The double barrel fires only from its walk sprite; an empty gun does nothing.
         if (p.ammo > 0 && (a.side === undefined || p.sprite === a.walk)) {
           p.ammo--;
@@ -939,8 +1014,9 @@ export async function play(env) {
           fire(p, aimDeg(), a, true, a.side !== undefined ? p.barrel : 0);
         }
       } else {
-        p.sprite = a ? a.attack : P.punch || P.walk;
-        p.attack = { frames: (a || P.punch) ? frames(p.sprite) : Math.ceil(MELEE.cooldown * MELEE.imageSpeed), gun: false, imageSpeed: MELEE.imageSpeed };
+        const punch = P.punches[p.punch++ % (P.punches.length || 1)];
+        p.sprite = a ? a.attack : punch || P.walk;
+        p.attack = { frames: (a || punch) ? frames(p.sprite) : Math.ceil(MELEE.cooldown * MELEE.imageSpeed), gun: false, imageSpeed: MELEE.imageSpeed, hits: new Set() };
         p.attackFrame = a ? a.frame : MELEE.startFrame; p.cooldown = MELEE.cooldown;
         sfx(SOUND.swing[Math.floor(random(2))]);
       }
@@ -948,8 +1024,17 @@ export async function play(env) {
     mouse.click = false;
     if (attacking()) {
       const reach = { x: p.x + MELEE.reach * Math.cos(p.aim), y: p.y + MELEE.reach * Math.sin(p.aim) };
-      if (!p.attack.gun) for (const e of [...enemies])
-        if (overlap(p, box, e, e.box) || overlap(reach, box, e, e.box)) knockOut(e, pointDir(p.x, p.y, e.x, e.y), held() ? SOUND.hit : SOUND.punch);
+      if (!p.attack.gun) for (const e of [...enemies]) {
+        if (!(overlap(p, box, e, e.box) || overlap(reach, box, e, e.box))) continue;
+        const dir = pointDir(p.x, p.y, e.x, e.y);
+        // Tony's fists and the chainsaw kill: once per swing, so a fat one takes several.
+        if (fan?.lethal && !held()) {
+          if (p.attack.hits.has(e)) continue;
+          p.attack.hits.add(e);
+          sfx(SOUND.hit);
+          shoot(e, dir, false, e.spr.deadBlunt);
+        } else knockOut(e, dir, held() ? SOUND.hit : SOUND.punch);
+      }
       p.attackFrame += p.attack.imageSpeed;
       if (p.attackFrame >= p.attack.frames) { p.attack = null; p.sprite = walkSprite(); p.attackFrame = 0; }
     }
@@ -1181,7 +1266,7 @@ export async function play(env) {
   }
   function leave(lift) {
     handle.stop();
-    const carried = { x: p.x, y: p.y, weapon: p.weapon, ammo: p.ammo, elevator: lift && { x: lift.x }, stats };
+    const carried = { x: p.x, y: p.y, weapon: p.weapon, ammo: p.ammo, elevator: lift && { x: lift.x }, stats, character: fan && pobj.name };
     if (!env.next || !env.next(room, carried)) env.status(`${room.name} cleared: this is the last room in order.`);
   }
 
@@ -1422,7 +1507,7 @@ export async function play(env) {
     if (held()?.gun) {
       cx.font = 'bold 12px monospace';
       cx.fillStyle = '#fff';
-      cx.fillText(`${p.weapon} ${p.ammo}`, 8 - sx, VIEW_H - 8 - sy);
+      cx.fillText(`${held().label || p.weapon} ${p.ammo}`, 8 - sx, VIEW_H - 8 - sy);
     }
     if (p.dead) {
       sprite(p.dead.sprite, p.dead.frame, p.x, p.y, -p.dead.angle * RAD);
@@ -1430,8 +1515,12 @@ export async function play(env) {
     }
     if (p.exec) { sprite(p.exec.sprite, p.exec.frame, p.x, p.y, -p.exec.angle * RAD); cx.drawImage(over, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H); cx.restore(); hud(); return; }
     const moving = p.hs || p.vs;
-    sprite(P.legs, moving ? p.frame : 0, p.x, p.y, p.dir);
-    sprite(p.sprite, attacking() ? p.attackFrame : moving ? p.frame : 0, p.x, p.y, p.aim);
+    if (p.roll) sprite(P.roll, p.roll.frame, p.x, p.y, p.roll.dir);
+    else {
+      sprite(P.legs, moving ? p.frame : 0, p.x, p.y, p.dir);
+      if (held()?.special) for (const s of bearArms()) sprite(P.arm, p.flash && s.side === p.barrel ? 1 : 0, s.x, s.y, -s.deg * RAD);
+      sprite(p.sprite, attacking() ? p.attackFrame : moving ? p.frame : 0, p.x, p.y, p.aim);
+    }
     cx.drawImage(over, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
     cx.restore();
     hud();
@@ -1468,7 +1557,7 @@ export async function play(env) {
     diagnostics() {
       return {
         room: room.name, character: pobj.name, running, paused: !!env.paused?.(),
-        player: { x: p.x, y: p.y, sprite: p.sprite, weapon: p.weapon, ammo: p.ammo, attack: p.attack, attackFrame: p.attackFrame, cooldown: p.cooldown, executing: !!p.exec, dead: !!p.dead },
+        player: { x: p.x, y: p.y, sprite: p.sprite, weapon: p.weapon, ammo: p.ammo, attack: p.attack, attackFrame: p.attackFrame, cooldown: p.cooldown, executing: !!p.exec, dead: !!p.dead, roll: p.roll && { ...p.roll }, spread: p.spread },
         input: { keys: [...keys], pressed: [...pressed], mouse: { ...mouse } },
         playerAnimations: { ...P },
         frameCounts: Object.fromEntries([...art].map(([name, value]) => [name, value.hit.frames.length])),

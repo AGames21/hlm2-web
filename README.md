@@ -104,6 +104,17 @@ card (fntPartPrefix / fntChapter, or the film title for the prologue), plays the
 Escape returns to the menu. Not yet: the title scene's palms and houses, NPCs and dialogue in intro
 rooms, and the censor option's effect.
 
+Fans masks: rooms with an objMaskMenu (the Fans levels) open the mask menu (`maskMenu` in
+`web/menu.js`, sprMasksBig, arrows/click/Enter; the pick is kept on restart and floor change). The
+`FANS` table in `web/game.js` sets each one up: Corey (objPlayerZebra) rolls on Space with brief
+invulnerability, Tony (objPlayerTiger) kills with alternating punches and cannot pick up weapons,
+Alex & Ash (objPlayerSwanChainsaw) kill with the chainsaw, Mark (objPlayerBear) starts with two MP5s
+(64 rounds, alternating arms; right click spreads them sideways). Guesses, not decoded: the roll's
+speed, frame rate, cooldown and invulnerable frames, the MP5 stats and ammo, Mark's shoulder offset and
+spread direction, and the chainsaw/fist lethality model. Ash's gun follower is not ported.
+
+Test room: rmFansLevel1Floor1 (enemies sit close to the spawn).
+
 ## Run
 
 For code-only development, run `node server.js` (no dependency install or build).

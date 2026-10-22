@@ -475,6 +475,58 @@ export async function card(G, canvas, zoom, s, kind) {
   });
 }
 
+// --- objMaskMenu: the Fans pick a mask before their levels. Selection 0..3,
+// left/right (A/D) cycles, a click or Enter picks; the masks slide in from
+// -700. sprMasksBig frames 0..3 follow the menu order (frame 4 is Ash's).
+// Locked masks are skipped in the exe; all four are open here.
+export const MASKS = [
+  { name: 'COREY', obj: 'objPlayerZebra', frame: 0, note: 'ROLL (SPACE)' },
+  { name: 'TONY', obj: 'objPlayerTiger', frame: 1, note: 'LETHAL FISTS, NO WEAPONS' },
+  { name: 'ALEX & ASH', obj: 'objPlayerSwanChainsaw', frame: 2, note: 'CHAINSAW' },
+  { name: 'MARK', obj: 'objPlayerBear', frame: 3, note: 'DUAL MP5S, RIGHT CLICK SPREADS' },
+];
+let lastMask = 0;
+export async function maskMenu(G, canvas, zoom) {
+  const cx = setup(canvas, zoom);
+  const [big, small] = await Promise.all(['fntChapter', 'fntScoreSmall'].map(n => loadFont(G, n)));
+  const sp = await sprites(G, ['sprMasksBig', 'sprScanlines', 'sprNoise']);
+  let sel = lastMask, slide = -700;
+  const n = MASKS.length, slot = 130;
+  return loop(canvas, (t, ev) => {
+    for (const e of ev) {
+      if (e.k === 'left' || e.k === 'up') sel = (sel + n - 1) % n;
+      if (e.k === 'right' || e.k === 'down') sel = (sel + 1) % n;
+      if (e.k === 'click' && t > 10) {
+        // A click on a side mask turns to it; on the middle one, picks it.
+        const i = Math.round((e.x - W / 2) / slot);
+        if (i) { sel = (sel + n + Math.sign(i)) % n; continue; }
+      }
+      if ((e.k === 'ok' || e.k === 'click') && t > 10) { lastMask = sel; return MASKS[sel].obj; }
+      if (e.k === 'back') return null;
+    }
+    slide = Math.min(0, slide + Math.max(4, -slide * 0.15));
+    const tt = t / 60;
+    const g = cx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#12051f'); g.addColorStop(1, css(merge([60, 0, 50], [140, 20, 60], wave(1, tt))));
+    cx.fillStyle = g;
+    cx.fillRect(0, 0, W, H);
+    drawText(cx, small, 'CHOOSE YOUR MASK', W / 2, 16, { align: 0.5, colour: '#fff' });
+    for (let d = -2; d <= 2; d++) {
+      const m = MASKS[(sel + d + n * 2) % n], x = W / 2 + d * slot + slide;
+      cx.globalAlpha = d ? 0.35 : 1;
+      blit(cx, sp.sprMasksBig, m.frame, x, H / 2 - 22 + (d ? 0 : Math.sin(tt * 3) * 3), { centre: true, scale: d ? 0.55 : 0.9 });
+    }
+    cx.globalAlpha = 1;
+    const m = MASKS[sel];
+    const sc = Math.min(0.55, (W - 30) / textWidth(big, m.name));
+    for (const [d, c] of [[3, '#000'], [0, css(merge(C.fuchsia, C.yellow, wave(2, tt)))]])
+      drawText(cx, big, m.name, W / 2 + d, H - 92 + d, { align: 0.5, colour: c, scale: sc });
+    drawText(cx, small, m.note, W / 2, H - 28, { align: 0.5, colour: '#c8b8ff', scale: 0.8 });
+    tile(cx, sp.sprScanlines, 0.2);
+    tile(cx, sp.sprNoise, 0.05, (t * 37) % 160, (t * 53) % 160);
+  });
+}
+
 // The whole front end: logos, splash, notice (first visit of the page
 // only), then the title. Resolves with what the title chose.
 let booted = false;

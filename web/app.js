@@ -6,7 +6,7 @@ import * as T from './tables.js';
 import { play, musicFor } from './game.js';
 import { Audio, RemoteFile } from './audio.js';
 import { scoreScreen } from './score.js';
-import { frontEnd, card, abortMenu, STORY, progress, options } from './menu.js';
+import { frontEnd, card, maskMenu, abortMenu, STORY, progress, options } from './menu.js';
 import { YouTubePlayer, youtubeTrack } from './youtube.js';
 import { SOUNDTRACK, SOUNDTRACK_MIX, SceneSoundtrack, trackLabel, trackSearch } from './soundtrack.js';
 import { drawRoomItems } from './render.js';
@@ -198,21 +198,29 @@ function stopPlay() {
 }
 
 // carry: what the player brings from the floor before (position, weapon, ammo).
-async function startPlay(name = $('room').value, carry = null, track) {
+// character: the Fans' mask, picked on a room with objMaskMenu and kept on a restart.
+async function startPlay(name = $('room').value, carry = null, track, character = carry?.character) {
   stopPlay();
   const request = menuToken;
   const room = G.rooms.list.find(r => r.name === name);
   if (!room) return false;
   const { items, imgs, levelAtlas } = await roomItems(room, false);
   if (request !== menuToken) return false;
+  if (!character && room.insts.some(i => G.objects.get(i.obj)?.name === 'objMaskMenu')) {
+    character = await maskMenu(G, $('canvas'), +$('zoom').value);
+    if (request !== menuToken || typeof character !== 'string') {
+      if (character === null) status('No mask picked.');
+      return false;
+    }
+  }
   const frames = name => findFrames(name, levelAtlas);
   // The player's sprites often live in shared atlases the room doesn't use.
   const load = async atlas => { if (!imgs.has(atlas)) imgs.set(atlas, await image(atlas)); };
-  const env = { G, room, items, imgs, frames, load, canvas: $('canvas'), zoom: +$('zoom').value, carry,
+  const env = { G, room, items, imgs, frames, load, canvas: $('canvas'), zoom: +$('zoom').value, carry, character,
     status: message => { if (request === menuToken) status(message); },
     cancelled: () => request !== menuToken,
     paused: () => $('settings-dialog').open,
-    restart: () => startPlay(room.name, carry, track), next: nextFloor };
+    restart: () => startPlay(room.name, carry, track, character), next: nextFloor };
   $('canvas').hidden = false;
   $('intro').hidden = true;
   const started = await play(env);
