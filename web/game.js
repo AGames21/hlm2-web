@@ -666,6 +666,7 @@ export async function play(env) {
   });
 
   await Promise.all([...art.values()].map(a => env.load(a.hit.atlas)));
+  if (env.cancelled?.()) return null;
 
   // Pre-render the room into the layers under and over the player, leaving
   // out everything that moves.
@@ -713,6 +714,8 @@ export async function play(env) {
     e.type === 'keydown' ? keys.add(k) : keys.delete(k);
   };
   const onMouse = (e) => {
+    if (env.paused?.()) return;
+    if (e.type === 'mousedown') canvas.focus?.({ preventScroll: true });
     const r = canvas.getBoundingClientRect();
     mouse.x = (e.clientX - r.left) * VIEW_W / r.width;
     mouse.y = (e.clientY - r.top) * VIEW_H / r.height;
@@ -720,8 +723,12 @@ export async function play(env) {
     if (e.type === 'mousedown' && e.button === 2) mouse.right = true;
   };
   const noMenu = (e) => e.preventDefault();
+  const clearInput = () => { keys.clear(); pressed.clear(); mouse.click = mouse.right = false; p.hs = p.vs = 0; };
+  const visibility = () => { if (globalThis.document?.hidden) clearInput(); };
   addEventListener('keydown', onKey);
   addEventListener('keyup', onKey);
+  addEventListener('blur', clearInput);
+  globalThis.document?.addEventListener('visibilitychange', visibility);
   canvas.addEventListener('mousemove', onMouse);
   canvas.addEventListener('mousedown', onMouse);
   canvas.addEventListener('contextmenu', noMenu);
@@ -1452,6 +1459,7 @@ export async function play(env) {
     next();
   };
   if (env.autostart !== false) next();
+  canvas.focus?.({ preventScroll: true });
   env.status(`Playing ${room.name} as ${pobj.name}: use your movement keys or arrows, mouse to aim, left click to attack, right click to pick up or throw. Change keys in Settings. Esc or Stop to leave.`);
 
   // Handle for tests and for stopping.
@@ -1480,6 +1488,8 @@ export async function play(env) {
       running = false;
       removeEventListener('keydown', onKey);
       removeEventListener('keyup', onKey);
+      removeEventListener('blur', clearInput);
+      globalThis.document?.removeEventListener('visibilitychange', visibility);
       canvas.removeEventListener('mousemove', onMouse);
       canvas.removeEventListener('mousedown', onMouse);
       canvas.removeEventListener('contextmenu', noMenu);

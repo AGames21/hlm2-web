@@ -51,7 +51,7 @@ let G = null;
 let audio = null;
 const getAudio = () => audio ||= new Audio();
 
-async function openGame(blob) {
+async function openGame(blob, progress = status) {
   const wad = await Wad.open(blob);
   const gl = name => wad.bytes('GL/' + name);
   const [spr, obj, bgs, rms, lvl, msk, snd] = await Promise.all([
@@ -63,6 +63,7 @@ async function openGame(blob) {
     wad, sprites: T.sprites(spr), objects: T.objects(obj), backgrounds: T.backgrounds(bgs),
     rooms: T.rooms(rms), levelAtlas: T.levelAtlases(lvl), masks: T.collisionMasks(msk),
     frames: new Map(), images: new Map(),
+    sounds: T.sounds(snd),
   };
   // Index every atlas frame by sprite name: name -> [{atlas, frames}].
   const metas = wad.names('Atlases/').filter(n => n.endsWith('.meta'));
@@ -74,11 +75,8 @@ async function openGame(blob) {
         game.frames.get(name).push({ atlas, frames });
       }
     }));
-    status(`Indexing atlases ${Math.min(i + 64, metas.length)}/${metas.length}`);
+    progress(`Indexing atlases ${Math.min(i + 64, metas.length)}/${metas.length}`);
   }
-  game.audio = getAudio();
-  game.audio.wad = wad;
-  game.audio.table = T.sounds(snd);
   return game;
 }
 
@@ -128,8 +126,9 @@ async function roomItems(room, showHidden) {
   return { items, imgs, missing, lvl, levelAtlas };
 }
 
-async function drawRoom(room) {
+async function drawRoom(room, request = menuToken) {
   const { items, imgs, missing, lvl } = await roomItems(room, $('hidden').checked);
+  if (request !== menuToken) return;
 
   const zoom = +$('zoom').value;
   const cv = $('canvas');
@@ -149,9 +148,11 @@ async function drawRoom(room) {
 }
 
 // --- Play mode.
-let game = null;
+let game = null, scoreController = null;
 
 function stopPlay() {
+  scoreController?.abort();
+  scoreController = null;
   menuToken++;
   abortMenu();
   if (!game) return;
@@ -163,20 +164,28 @@ function stopPlay() {
 // carry: what the player brings from the floor before (position, weapon, ammo).
 async function startPlay(name = $('room').value, carry = null, track) {
   stopPlay();
+  const request = menuToken;
   const room = G.rooms.list.find(r => r.name === name);
-  if (!room) return;
+  if (!room) return false;
   const { items, imgs, levelAtlas } = await roomItems(room, false);
+  if (request !== menuToken) return false;
   const frames = name => findFrames(name, levelAtlas);
   // The player's sprites often live in shared atlases the room doesn't use.
   const load = async atlas => { if (!imgs.has(atlas)) imgs.set(atlas, await image(atlas)); };
-  const env = { G, room, items, imgs, frames, load, canvas: $('canvas'), zoom: +$('zoom').value, status, carry,
+  const env = { G, room, items, imgs, frames, load, canvas: $('canvas'), zoom: +$('zoom').value, carry,
+    status: message => { if (request === menuToken) status(message); },
+    cancelled: () => request !== menuToken,
     paused: () => $('settings-dialog').open,
     restart: () => startPlay(room.name, carry, track), next: nextFloor };
   $('canvas').hidden = false;
   $('intro').hidden = true;
-  game = window.game = await play(env);
+  const started = await play(env);
+  if (!started) return false;
+  if (request !== menuToken) { started.stop(); return false; }
+  game = window.game = started;
   G.audio.playMusic(!options.music ? null : track !== undefined ? track : musicFor(G.rooms, room));
   $('play').textContent = 'Stop';
+  return true;
 }
 
 // The floors of one level share a name up to their Floor/Part number, e.g.
@@ -187,6 +196,17 @@ const levelOf = name => {
   return m !== n ? m : n.replace(/\d+[A-Z]?$/, '');
 };
 const isHard = name => /Hard$/.test(name);
+
+async function showScore(level, stats) {
+  scoreController?.abort();
+  const controller = new AbortController();
+  scoreController = controller;
+  const continued = await scoreScreen(G, $('canvas'), level, stats, {
+    signal: controller.signal, paused: () => $('settings-dialog').open,
+  });
+  if (scoreController === controller) scoreController = null;
+  return continued;
+}
 
 // An exit was taken: play the next room in the game's room order
 // (room_goto_next). The Hard copies and test rooms that sit in the order are
@@ -211,7 +231,8 @@ function nextFloor(room, carry) {
   if (sameLevel) { go(); return true; }
   if (!carry?.stats?.kills) { go(); return !!next; }
   status(`${levelOf(room.name).replace(/^rm/, '')} cleared. Click or press a key to go on.`);
-  scoreScreen(G, $('canvas'), levelOf(room.name).replace(/^rm/, '').toUpperCase(), carry.stats).then(() => {
+  showScore(levelOf(room.name).replace(/^rm/, '').toUpperCase(), carry.stats).then(continued => {
+    if (!continued) return;
     if (next) go(); else status('That was the last room in order.');
   });
   return true;
@@ -255,8 +276,9 @@ async function runScene(i) {
   const room = s.intro && G.rooms.list.find(r => r.name === s.intro);
   if (room) {
     story = { i, intro: true };
-    await startPlay(room.name, null, s.introTrack);
-    status(`${s.scene} ${s.title}: intro-room preview. Scripted dialogue is not implemented yet. Enter starts the level; Esc returns to the menu.`);
+    if (await startPlay(room.name, null, s.introTrack)) {
+      status(`${s.scene} ${s.title}: intro-room preview. Scripted dialogue is not implemented yet. Enter starts the level; Esc returns to the menu.`);
+    }
   } else startLevel();
 }
 
@@ -280,7 +302,8 @@ function storyNext(room, carry) {
   }
   const s = STORY[story.i], i = story.i;
   status(`${s.title} cleared. Click or press a key to go on.`);
-  scoreScreen(G, $('canvas'), s.title, carry?.stats || { kills: 0, steps: 0 }).then(() => {
+  showScore(s.title, carry?.stats || { kills: 0, steps: 0 }).then(continued => {
+    if (!continued) return;
     progress.reach(i + 1);
     runScene(i + 1);
   });
@@ -306,13 +329,14 @@ function fillRooms() {
 async function showSelected() {
   if (!G) return;
   stopPlay();
+  const request = menuToken;
   const room = G.rooms.list.find(r => r.name === $('room').value);
   if (!room) return;
   history.replaceState(null, '', '#' + encodeURIComponent(room.name));
   try {
-    await drawRoom(room);
+    await drawRoom(room, request);
   } catch (e) {
-    status('Draw failed: ' + e.message);
+    if (request === menuToken) status('Draw failed: ' + e.message);
     console.error(e);
   }
 }
@@ -320,12 +344,20 @@ async function showSelected() {
 async function start(blob) {
   status('Reading wad index...');
   stopPlay();
+  const request = menuToken;
   getAudio().playMusic(null);
-  G = window.G = await openGame(blob);
+  const loaded = await openGame(blob, message => { if (request === menuToken) status(message); });
+  if (request !== menuToken) return false;
+  loaded.audio = getAudio();
+  loaded.audio.wad = loaded.wad;
+  loaded.audio.table = loaded.sounds;
+  for (const key of loaded.audio.buffers.keys()) if (!key.startsWith('Music/')) loaded.audio.buffers.delete(key);
+  G = window.G = loaded;
   $('menu').disabled = $('play').disabled = false;
   fillRooms();
   if (!location.hash || location.hash === '#menu') showMenu();
   else await showSelected();
+  return true;
 }
 
 // Music is independent of the game data and can be used as a standalone player.
@@ -357,8 +389,7 @@ $('pick').onchange = async e => {
       await store(MUSIC_WAD, music).catch(() => { $('music-status').textContent += ' Browser storage unavailable; reload the file next visit.'; });
     }
     if (data) {
-      await start(data);
-      await store(DATA_WAD, data).catch(() => status('Game loaded; browser storage unavailable.'));
+      if (await start(data)) await store(DATA_WAD, data).catch(() => status('Game loaded; browser storage unavailable.'));
     }
   } catch (err) {
     status('Could not read that file: ' + err.message);
@@ -444,6 +475,9 @@ $('settings-report').onclick = () => {
   $('settings-message').textContent = 'Bug report saved. It contains room and combat state, with no WAD files.';
 };
 $('settings').onclick = $('fullscreen-settings').onclick = openSettings;
+$('settings-dialog').addEventListener('close', () => {
+  if (!$('canvas').hidden) $('canvas').focus({ preventScroll: true });
+});
 addEventListener('settingschange', applySettings);
 applySettings();
 $('play').onclick = () => G && (story = null, game ? (G.audio.playMusic(null), showSelected()) : startPlay().catch(e => { status('Play failed: ' + e.message); console.error(e); }));

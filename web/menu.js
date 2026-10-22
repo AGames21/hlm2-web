@@ -164,6 +164,7 @@ function setup(canvas, zoom) {
   canvas.style.width = W * zoom + 'px';
   canvas.style.height = H * zoom + 'px';
   canvas.hidden = false;
+  canvas.focus?.({ preventScroll: true });
   const cx = canvas.getContext('2d');
   cx.imageSmoothingEnabled = false;
   return cx;

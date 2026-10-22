@@ -93,13 +93,15 @@ const clock = steps => {
 };
 
 // Shows the screen on canvas until a click or key; resolves then.
-export async function scoreScreen(G, canvas, level, stats) {
+export async function scoreScreen(G, canvas, level, stats, { signal, paused = () => false } = {}) {
   const [title, big, small] = await Promise.all(['fntLevelClear', 'fntScore', 'fntScoreSmall'].map(n => loadFont(G, n)));
+  if (signal?.aborted) return false;
   const cx = canvas.getContext('2d'), W = canvas.width, H = canvas.height;
   const rows = [[LABEL.kills, String(stats.kills)], [LABEL.time, clock(stats.steps)], [LABEL.score, (stats.score ?? 0) + 'pts']];
-  let t = 0, done = false, resolve;
+  let t = 0, done = false, resolve, timer;
   const draw = () => {
     if (done) return;
+    if (paused()) { timer = setTimeout(draw, 1000 / 60); return; }
     t++;
     cx.save();
     cx.fillStyle = '#0c0418';
@@ -124,18 +126,25 @@ export async function scoreScreen(G, canvas, level, stats) {
     });
     if (t > 60 && Math.floor(t / 30) % 2) drawText(cx, small, 'CLICK TO CONTINUE', W / 2, H - 30, { align: 0.5, colour: '#fff' });
     cx.restore();
-    setTimeout(draw, 1000 / 60);
+    timer = setTimeout(draw, 1000 / 60);
   };
-  const go = (e) => {
-    if (t < 30 || (e.type === 'keydown' && e.repeat)) return;
-    done = true;
+  const finish = continued => {
+    if (done) return;
+    done = true; clearTimeout(timer);
     removeEventListener('keydown', go);
     canvas.removeEventListener('mousedown', go);
-    resolve();
+    signal?.removeEventListener('abort', cancel);
+    resolve(continued);
   };
+  const cancel = () => finish(false);
+  const go = (e) => {
+    if (paused() || t < 30 || (e.type === 'keydown' && (e.repeat || e.target.closest?.('input, select, textarea, button') || e.target.isContentEditable))) return;
+    finish(true);
+  };
+  const shown = new Promise(r => { resolve = r; });
   addEventListener('keydown', go);
   canvas.addEventListener('mousedown', go);
-  const shown = new Promise(r => { resolve = r; });
+  signal?.addEventListener('abort', cancel, { once: true });
   draw();
   return shown;
 }

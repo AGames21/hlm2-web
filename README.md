@@ -108,6 +108,8 @@ rooms, and the censor option's effect.
 
 For code-only development, run `node server.js` (no dependency install or build).
 Run the regression checks with `node --test tests/*.test.mjs`.
+The [playtest report](docs/playtest-report.md) documents coverage, limitations,
+and how to run the integrated browser suite. Both suites run before Pages deploys.
 These include mouse-input combat and floor handoff checks using synthetic room
 and sprite metadata. Knockouts, attacks, and executions now keep their gameplay
 state even if a particular animation is absent; fallback poses do not reproduce
