@@ -95,6 +95,15 @@ bonus). Test rooms: rmSonMansionFloor1 and rmJunglePlace1Hard (dodgers), rmPriso
 rmHotelLobby and rmBankSideRoom (hiding), rmJunglePlace1 (fat gun), rmFansLevel1Floor2 -> score
 screen -> rmPizzaPlace.
 
+Step 11: the front end and the story. `web/menu.js` plays the boot flow once (Devolver and Spike
+Chunsoft logos, the Dennaton splash, the content NOTICE) and then the title menu in the game's own
+fonts: NEW GAME, CONTINUE (scene list; scenes unlock as you finish them, kept in localStorage),
+OPTIONS (music, sensitive scenes) and LEVEL VIEWER. A story run shows the act card and the scene
+card (fntPartPrefix / fntChapter, or the film title for the prologue), plays the scene's intro room
+(Enter skips to the level), then the level's floors in order, the score screen, and the next scene.
+Escape returns to the menu. Not yet: the title scene's palms and houses, NPCs and dialogue in intro
+rooms, and the censor option's effect.
+
 ## Run
 
 ```bash

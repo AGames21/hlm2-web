@@ -53,7 +53,7 @@ export function drawText(cx, f, s, x, y, { align = 0, colour = '#fff', scale = 1
   for (const ch of s) {
     const g = f.chars.get(ch.codePointAt(0));
     if (!g) continue;
-    if (g.w > 1 && g.h > 1) cx.drawImage(tinted(f, g.page, colour), g.x, g.y, g.w, g.h,
+    if (g.w > 0 && g.h > 0) cx.drawImage(tinted(f, g.page, colour), g.x, g.y, g.w, g.h,
       Math.round(at + g.ox * scale), Math.round(y + g.oy * scale), g.w * scale, g.h * scale);
     at += g.adv * scale;
   }

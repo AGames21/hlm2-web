@@ -6,6 +6,7 @@ import * as T from './tables.js';
 import { play, musicFor } from './game.js';
 import { Audio, RemoteFile } from './audio.js';
 import { scoreScreen } from './score.js';
+import { frontEnd, card, abortMenu, STORY, progress, options } from './menu.js';
 
 const $ = id => document.getElementById(id);
 const DATA_WAD = 'hlm2_data_desktop.wad';
@@ -142,6 +143,8 @@ async function drawRoom(room) {
 let game = null;
 
 function stopPlay() {
+  menuToken++;
+  abortMenu();
   if (!game) return;
   game.stop();
   game = window.game = null;
@@ -149,7 +152,7 @@ function stopPlay() {
 }
 
 // carry: what the player brings from the floor before (position, weapon, ammo).
-async function startPlay(name = $('room').value, carry = null) {
+async function startPlay(name = $('room').value, carry = null, track) {
   stopPlay();
   const room = G.rooms.list.find(r => r.name === name);
   if (!room) return;
@@ -158,11 +161,11 @@ async function startPlay(name = $('room').value, carry = null) {
   // The player's sprites often live in shared atlases the room doesn't use.
   const load = async atlas => { if (!imgs.has(atlas)) imgs.set(atlas, await image(atlas)); };
   const env = { G, room, items, imgs, frames, load, canvas: $('canvas'), zoom: +$('zoom').value, status, carry,
-    restart: () => startPlay(room.name, carry), next: nextFloor };
+    restart: () => startPlay(room.name, carry, track), next: nextFloor };
   $('canvas').hidden = false;
   $('intro').hidden = true;
   game = window.game = await play(env);
-  G.audio.playMusic(musicFor(G.rooms, room));
+  G.audio.playMusic(!options.music ? null : track !== undefined ? track : musicFor(G.rooms, room));
   $('play').textContent = 'Stop';
 }
 
@@ -181,6 +184,7 @@ const isHard = name => /Hard$/.test(name);
 // shows first, and the next level starts fresh. Returns false when there is
 // no room after this one.
 function nextFloor(room, carry) {
+  if (story) return storyNext(room, carry);
   const order = G.rooms.order;
   let next = null;
   for (let i = order.indexOf(room.id) + 1; i > 0 && i < order.length && !next; i++) {
@@ -199,6 +203,74 @@ function nextFloor(room, carry) {
   status(`${levelOf(room.name).replace(/^rm/, '')} cleared. Click or press a key to go on.`);
   scoreScreen(G, $('canvas'), levelOf(room.name).replace(/^rm/, '').toUpperCase(), carry.stats).then(() => {
     if (next) go(); else status('That was the last room in order.');
+  });
+  return true;
+}
+
+// --- Story mode: the scenes in order, each with its act card, scene card,
+// intro room (skip with Enter) and level, then the score screen.
+let story = null, menuToken = 0;
+
+async function showMenu() {
+  stopPlay();
+  story = null;
+  const token = menuToken;
+  $('intro').hidden = true;
+  history.replaceState(null, '', '#menu');
+  status('Arrows and Enter, or the mouse. Esc goes back.');
+  const r = await frontEnd(G, $('canvas'), +$('zoom').value);
+  if (token !== menuToken) return;
+  if (r.action === 'viewer') {
+    history.replaceState(null, '', '#rmTutorialFloor1');
+    fillRooms();
+    showSelected();
+  } else runScene(r.scene);
+}
+
+async function runScene(i) {
+  const s = STORY[i];
+  if (!s) { showMenu(); return; }
+  stopPlay();
+  const token = menuToken;
+  story = { i, intro: false };
+  progress.reach(i);
+  const zoom = +$('zoom').value, cv = $('canvas');
+  status(`${s.scene}: ${s.title}`);
+  if (s.act) await card(G, cv, zoom, s, 'act');
+  if (token !== menuToken) return;
+  await card(G, cv, zoom, s, s.film ? 'film' : 'scene');
+  if (token !== menuToken) return;
+  const room = s.intro && G.rooms.list.find(r => r.name === s.intro);
+  if (room) {
+    story = { i, intro: true };
+    await startPlay(room.name, null, s.introTrack);
+    status(`${s.scene} ${s.title}: ${room.name}. Walk out, or press Enter to go to the level. Esc for the menu.`);
+  } else startLevel();
+}
+
+function startLevel() {
+  const s = STORY[story.i];
+  story.intro = false;
+  startPlay(s.level, null, s.track).catch(e => { status('Play failed: ' + e.message); console.error(e); });
+}
+
+function storyNext(room, carry) {
+  if (story.intro) { startLevel(); return true; }
+  const order = G.rooms.order;
+  let next = null;
+  for (let i = order.indexOf(room.id) + 1; i > 0 && i < order.length && !next; i++) {
+    const r = G.rooms.list.find(r => r.id === order[i]);
+    if (r && !/Test$/.test(r.name) && !isHard(r.name)) next = r;
+  }
+  if (next && levelOf(next.name) === levelOf(room.name)) {
+    startPlay(next.name, carry, undefined).catch(e => { status('Play failed: ' + e.message); console.error(e); });
+    return true;
+  }
+  const s = STORY[story.i], i = story.i;
+  status(`${s.title} cleared. Click or press a key to go on.`);
+  scoreScreen(G, $('canvas'), s.title, carry?.stats || { kills: 0, steps: 0 }).then(() => {
+    progress.reach(i + 1);
+    runScene(i + 1);
   });
   return true;
 }
@@ -235,9 +307,9 @@ async function showSelected() {
 async function start(blob) {
   status('Reading wad index...');
   G = window.G = await openGame(blob);
-  if (!location.hash) location.hash = 'rmTutorialFloor1';
   fillRooms();
-  await showSelected();
+  if (!location.hash || location.hash === '#menu') showMenu();
+  else await showSelected();
 }
 
 // The music wad is optional; without it the game plays with effects only.
@@ -263,8 +335,12 @@ $('pick').onchange = async e => {
     console.error(err);
   }
 };
-$('play').onclick = () => G && (game ? (G.audio.playMusic(null), showSelected()) : startPlay().catch(e => { status('Play failed: ' + e.message); console.error(e); }));
-addEventListener('keydown', e => { if (e.key === 'Escape' && game) showSelected(); });
+$('play').onclick = () => G && (story = null, game ? (G.audio.playMusic(null), showSelected()) : startPlay().catch(e => { status('Play failed: ' + e.message); console.error(e); }));
+addEventListener('keydown', e => {
+  if (e.key === 'Escape' && game) story ? showMenu() : showSelected();
+  if (e.key === 'Enter' && game && story?.intro) { e.preventDefault(); startLevel(); }
+});
+$('menu').onclick = () => G && showMenu();
 $('filter').oninput = () => G && fillRooms();
 $('room').onchange = showSelected;
 $('zoom').onchange = () => (game ? startPlay(game.room) : showSelected());
