@@ -225,7 +225,7 @@ async function dennaton(G, cx, canvas) {
 // --- rmCensorship: the notice (strings 2940-2944), YES/NO with left/right.
 async function notice(G, cx, canvas) {
   const [title, details, yesno] = await Promise.all(['fntCensorshipTitle', 'fntCensorshipDetails', 'fntCensorshipYesNo'].map(n => loadFont(G, n)));
-  G.audio.playMusic(options.music ? 'Detection' : null);
+  G.audio.playMusic('Detection');
   let sel = options.censor ? 0 : 1;
   const lines = ['This game contains scenes', 'that allude to sexual violence.', '', 'Would you like to skip those scenes?'];
   return loop(canvas, (t, ev) => {
@@ -375,7 +375,7 @@ function pick(ev, sel, n, boxes, active = () => true) {
 
 // The title menu. Resolves with { action, scene }.
 async function title(G, cx, canvas, a, openSettings) {
-  G.audio.playMusic(options.music ? 'beams' : null);
+  G.audio.playMusic('beams');
   const [, , font, pre, option, small] = a.fonts;
   let sel = 0, screen = 'main', ssel = Math.min(progress.get(), STORY.length - 1), osel = 0, scroll = 0;
   return loop(canvas, (t, ev) => {
@@ -431,7 +431,7 @@ async function title(G, cx, canvas, a, openSettings) {
       const r = pick(ev, osel, items.length, boxes);
       osel = r.sel;
       if (r.back || (r.chose && osel === 2)) { screen = 'main'; osel = 0; }
-      else if (r.chose && osel === 0) { options.music = !options.music; options.save(); G.audio.playMusic(options.music ? 'beams' : null); }
+      else if (r.chose && osel === 0) { options.music = !options.music; options.save(); G.audio.playMusic('beams'); }
       else if (r.chose && osel === 1) { options.censor = !options.censor; options.save(); }
     }
   });

@@ -1,6 +1,6 @@
 # Playtest report — October 22, 2026
 
-Result after fixes: **32 simulation/regression tests and 25 integrated browser
+Result after fixes: **36 simulation/regression tests and 30 integrated browser
 scenarios passed**, with no uncaught browser exceptions in the exercised flow.
 Browser testing used Chromium on Linux, generated WADs, authored placeholder
 sprites/textures, generated WAV effects, and a generated OGG music track. No
@@ -17,7 +17,7 @@ original Hotline Miami 2 game files were available.
 | Floor and story flow | Locked exits, first/second-floor handoff, retained stats, second-floor textures/input, scores, menu, act/scene cards, intro-preview skip, saved progression |
 | Display/audio | Native fullscreen at desktop and portrait sizes, options inside fullscreen, generated music, separate volume gains, actual WAV/OGG decoding |
 | Lifecycle | Rapid Play clicks, delayed room draws, leaving score screens, old input-handler removal, cancelled screen loads |
-| HTTP and embeds | Current assets, HEAD and byte ranges, missing files, YouTube URL validation and iframe creation/closing with a network fixture |
+| HTTP and embeds | Current assets, HEAD and byte ranges, missing files, YouTube URL validation, cue routing, chapter loops, volume/mute, saved links, playlist priority, autoplay/error feedback, and iframe creation/closing with a recording IFrame API fixture |
 
 Tests use real browser input and the actual application, decoders, renderer, and
 simulation. They also place actors or clear synthetic targets at selected
@@ -45,6 +45,7 @@ not complete manual playthroughs of the original levels.
   claim is established by these generated fixtures.
 - Original scripted cutscenes/dialogue remain unimplemented; see
   [cutscene status](cutscene-status.md). They need the executable or REA exports.
+- The YouTube scene catalog currently has three sourced entries; the prologue and other missing entries require saved links. See [music sources](music-sources.md).
 - Live YouTube playback was not tested because the environment blocks YouTube;
   embed wiring was tested using a local network response fixture.
 - macOS-specific Chrome fullscreen behavior, controllers, and other browsers were

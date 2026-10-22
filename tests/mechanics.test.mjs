@@ -41,6 +41,11 @@ test('A hiding gunner fires, can kill the player, and permits restart after deat
   } }); t.after(() => game.stop());
   Object.assign(game.enemies[0], { x: game.player.x + 100, check: 0, frame: 4, cooldown: 0 });
   game.step(); assert.equal(game.enemies[0].ammo, 23); assert(game.bullets.some(b => !b.byPlayer));
+  // Gun spread may legitimately miss. Fix this shot's trajectory so this
+  // scenario verifies damage/restart instead of depending on a random hit.
+  for (const bullet of game.bullets) {
+    bullet.dir = -Math.atan2(game.player.y - bullet.y, game.player.x - bullet.x) * 180 / Math.PI;
+  }
   for (let i = 0; i < 20; i++) game.step();
   assert(game.player.dead);
   let restarted = false; env.restart = () => { restarted = true; };

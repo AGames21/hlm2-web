@@ -58,10 +58,10 @@ export class Audio {
   // Loop one music track; the same name keeps playing, null stops.
   async playMusic(name) {
     this.requestedMusic = name;
+    if (this.onMusicCue?.(name)) { this.stopLocalMusic(); return; }
     if (this.externalMusic) return;
     if (this.track?.name === name) return;
-    this.track?.src?.stop();
-    this.track = null;
+    this.stopLocalMusic();
     const file = name && `Music/${name}.ogg`;
     if (!name) return;
     const track = { name, src: null };
@@ -77,6 +77,11 @@ export class Audio {
     track.src.start();
     // Decoded tracks are 30-60 MB of PCM each; keep only the one playing.
     for (const f of this.buffers.keys()) if (f.startsWith('Music/') && f !== file) this.buffers.delete(f);
+  }
+
+  stopLocalMusic() {
+    this.track?.src?.stop();
+    this.track = null;
   }
 }
 

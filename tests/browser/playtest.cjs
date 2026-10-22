@@ -12,7 +12,11 @@ const failures = [];
 let passed = 0;
 async function check(name, run) {
   try { await run(); passed++; console.log('PASS:', name); return true; }
-  catch (error) { failures.push(name); console.error('FAIL:', name, '\n', error.stack); return false; }
+  catch (error) {
+    failures.push(name); console.error('FAIL:', name, '\n', error.stack);
+    if (process.env.GITHUB_ACTIONS) console.error(`::error title=${name.replaceAll(',', '%2C')}::${String(error.stack).replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A')}`);
+    return false;
+  }
 }
 async function freePort() {
   const server = net.createServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening');
@@ -71,6 +75,8 @@ async function punchAndFinish(page) {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const page = await context.newPage(), errors = [];
     page.on('pageerror', error => errors.push(error.message)); page.setDefaultTimeout(5000);
+    await page.route('https://www.youtube.com/iframe_api', route => route.fulfill({ status: 200, contentType: 'application/javascript', body: require('./youtube-api.cjs') }));
+    await page.route('https://www.youtube-nocookie.com/**', route => route.fulfill({ status: 200, contentType: 'text/html', body: '<p>Test embed</p>' }));
     await page.goto(base);
     await check('Code-only startup, generated music, volume and stop', async () => {
       assert(await page.locator('#play').isDisabled());
@@ -79,6 +85,13 @@ async function punchAndFinish(page) {
       await page.locator('#music-volume').fill('30');
       await page.locator('#music-play').click();
       await page.waitForFunction(() => document.querySelector('#music-play').textContent === 'Play music');
+    });
+    await check('One-click real-soundtrack embed works without a music archive', async () => {
+      await page.locator('#youtube-mix').click();
+      await page.waitForFunction(() => window.__youtubePlayers?.at(-1)?.ready !== false && document.querySelector('#youtube-status').textContent.startsWith('Playing'));
+      assert.match(await page.locator('#youtube-player').getAttribute('src'), /dEFcpyy_vq8/);
+      assert(await page.locator('#play').isDisabled());
+      await page.locator('#youtube-close').click();
     });
     const data = dataWad(), music = musicWad();
     await check('Music-only WAD decodes real OGG and survives reload without game data', async () => {
@@ -209,6 +222,66 @@ async function punchAndFinish(page) {
       assert.equal(await page.locator('#youtube-player').count(), 0);
       await page.locator('#youtube-url').fill('https://example.org/video'); await page.getByRole('button', { name: 'Load YouTube', exact: true }).click();
       assert.equal(await page.locator('#youtube-player').count(), 0);
+    });
+    await check('Saved scene links follow tutorial floors without restarting the song', async () => {
+      await page.locator('#room').selectOption('rmTutorialFloor1');
+      await page.waitForFunction(() => !window.game && document.querySelector('#status').textContent.startsWith('rmTutorialFloor1:'));
+      await page.locator('#play').click(); await page.waitForFunction(() => window.game?.room === 'rmTutorialFloor1');
+      await page.locator('#youtube-url').fill('https://youtu.be/abcdefghijk?t=15&end=50');
+      await page.locator('#youtube-cue').selectOption('Detection'); await page.locator('#youtube-save-scene').check();
+      await page.getByRole('button', { name: 'Load YouTube', exact: true }).click();
+      await page.waitForFunction(() => document.querySelector('#youtube-status').textContent.includes('Playing Prey Growl'));
+      const count = await page.evaluate(() => window.__youtubePlayers.length);
+      await page.evaluate(() => { window.game.enemies.length = 0; window.game.stats.kills = 1; }); await stepOntoExit(page);
+      await page.waitForFunction(() => window.game?.room === 'rmTutorialFloor2');
+      assert.equal(await page.evaluate(() => window.__youtubePlayers.length), count);
+      assert.equal(await page.evaluate(() => window.G.audio.track), null);
+      assert.match(await page.locator('#youtube-current').textContent(), /Detection/);
+    });
+    await check('Scene music loops chapters, uses game volume/mute, and reports autoplay/errors', async () => {
+      await page.evaluate(() => { const p = window.__youtubePlayers.at(-1); p.events.onStateChange({ target: p, data: 0 }); });
+      assert(await page.evaluate(() => window.__youtubePlayers.at(-1).calls.some(c => c[0] === 'seek' && c[1] === 15)));
+      await page.locator('#music-volume').fill('23');
+      assert.equal(await page.evaluate(() => window.__youtubePlayers.at(-1).volume), 23);
+      await page.locator('#settings').click(); await page.locator('[data-tab=audio]').click(); await page.locator('#setting-music').uncheck();
+      assert(await page.evaluate(() => window.__youtubePlayers.at(-1).muted));
+      assert.equal(await page.evaluate(() => window.G.audio.requestedMusic), 'Detection');
+      await page.locator('#setting-music').check(); await page.locator('#settings-close').click();
+      assert.equal(await page.evaluate(() => window.__youtubePlayers.at(-1).muted), false);
+      await page.evaluate(() => window.__youtubePlayers.at(-1).events.onAutoplayBlocked());
+      assert.match(await page.locator('#youtube-status').textContent(), /Press play/);
+      await page.evaluate(() => window.__youtubePlayers.at(-1).events.onError({ data: 150 }));
+      assert.match(await page.locator('#youtube-status').textContent(), /error 150.*replace/i);
+    });
+    await check('Missing scene tracks stop playback and saving a link starts the matching cue', async () => {
+      await page.evaluate(() => window.G.audio.playMusic('voyager'));
+      assert.equal(await page.locator('#youtube-player').count(), 0);
+      assert.match(await page.locator('#youtube-status').textContent(), /No YouTube link saved.*Voyager/);
+      await page.locator('#youtube-url').fill('https://youtu.be/lmnopqrstuv'); await page.locator('#youtube-cue').selectOption('voyager');
+      await page.getByRole('button', { name: 'Load YouTube', exact: true }).click();
+      await page.waitForFunction(() => document.querySelector('#youtube-status').textContent.includes('Playing Jasper'));
+      await page.evaluate(() => window.G.audio.playMusic('RollerMobster'));
+      await page.waitForFunction(() => window.__youtubePlayers.at(-1).video === 'eeeeeeeeeee');
+      await page.evaluate(() => window.G.audio.playMusic(null)); assert.equal(await page.locator('#youtube-player').count(), 0);
+    });
+    await check('Manual playlists retain priority and scene links survive reload', async () => {
+      await page.locator('#youtube-save-scene').uncheck();
+      await page.locator('#youtube-url').fill('https://www.youtube.com/playlist?list=PL1234567890');
+      await page.getByRole('button', { name: 'Load YouTube', exact: true }).click();
+      await page.waitForFunction(() => window.__youtubePlayers.at(-1).video === 'videoseries');
+      const count = await page.evaluate(() => window.__youtubePlayers.length);
+      await page.evaluate(() => window.G.audio.playMusic('Detection'));
+      assert.equal(await page.evaluate(() => window.__youtubePlayers.length), count);
+      await page.locator('#youtube-follow').check();
+      await page.reload();
+      await page.waitForFunction(() => window.G?.rooms.list.length === 6);
+      assert(await page.locator('#youtube-follow').isChecked());
+      // Restart the actual tutorial to check that the saved cue loads again.
+      await page.locator('#room').selectOption('rmTutorialFloor1');
+      await page.waitForFunction(() => document.querySelector('#status').textContent.startsWith('rmTutorialFloor1:'));
+      await page.locator('#play').click(); await page.waitForFunction(() => window.game?.room === 'rmTutorialFloor1');
+      await page.waitForFunction(() => document.querySelector('#youtube-player')?.src.includes('abcdefghijk'));
+      await page.locator('#youtube-close').click();
     });
     await check('Corrupt data WAD reports failure and preserves the saved valid WAD', async () => {
       await page.locator('#pick').setInputFiles({ name: 'hlm2_data_desktop.wad', mimeType: 'application/octet-stream', buffer: Buffer.from('invalid archive') });

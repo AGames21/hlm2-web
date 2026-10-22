@@ -90,3 +90,50 @@ test('Decode failure clears the current track and allows retry', async () => {
   await audio.playMusic('@original');
   assert(audio.track.src.started);
 });
+
+// Verify routing with a recording transport, separately from network/YouTube.
+const { SceneSoundtrack, SOUNDTRACK, BUILTIN_SOURCES } = await import('../web/soundtrack.js');
+const { youtubeTrack } = await import('../web/youtube.js');
+const { MUSIC } = await import('../web/game.js');
+const { STORY } = await import('../web/menu.js');
+
+test('Every menu, intro and level cue has a named soundtrack entry', () => {
+  const cues = ['beams', 'Detection', ...MUSIC.map(([, cue]) => cue), ...STORY.flatMap(s => [s.track, s.introTrack])].filter(Boolean);
+  for (const cue of cues) assert(Object.hasOwn(SOUNDTRACK, cue), cue);
+  for (const [cue, url] of Object.entries(BUILTIN_SOURCES)) {
+    assert(SOUNDTRACK[cue]); const parsed = youtubeTrack(url);
+    assert(parsed.videoId || parsed.list);
+  }
+});
+
+test('YouTube links retain chapter timestamps and fixed playlist entry indices', () => {
+  assert.deepEqual(youtubeTrack('https://youtu.be/abcdefghijk?t=1h2m3s&end=4000'), { videoId: 'abcdefghijk', list: null, index: 0, start: 3723, end: 4000 });
+  assert.equal(youtubeTrack('https://www.youtube.com/playlist?list=PL1234567890&index=5').index, 4);
+  assert.equal(youtubeTrack('https://youtu.be/abcdefghijk#t=90').start, 90);
+  for (const suffix of ['?t=banana', '?start=30&end=10', '?index=-1', '?index=1.2']) assert.throws(() => youtubeTrack('https://youtu.be/abcdefghijk' + suffix));
+});
+
+test('Scene routing follows cues, stops on silence or missing sources, and leaves manual videos alone', () => {
+  const calls = [], player = { play: (...args) => calls.push(args), stop: () => calls.push('stop') };
+  const scene = new SceneSoundtrack({ player, sources: { Detection: 'https://youtu.be/abcdefghijk', voyager: 'https://youtu.be/lmnopqrstuv' } });
+  assert.equal(scene.request('Detection'), false); assert.equal(calls.length, 0);
+  scene.enable(); assert.equal(calls.at(-1)[0], 'https://youtu.be/abcdefghijk');
+  scene.request('voyager'); assert.equal(calls.at(-1)[0], 'https://youtu.be/lmnopqrstuv');
+  scene.request(null); assert.equal(calls.at(-1), 'stop');
+  scene.stop(); scene.enable(); assert.equal(calls.at(-1), 'stop', 'enabling a silent scene must not invent a music cue');
+  scene.request('Blizzard'); assert.equal(calls.at(-1), 'stop');
+  scene.assign('Blizzard', 'https://youtu.be/abcdefghijk'); assert.equal(calls.at(-1)[0], 'https://youtu.be/abcdefghijk');
+  scene.manual('https://youtu.be/lmnopqrstuv'); const count = calls.length;
+  assert(scene.request('Detection')); assert.equal(calls.length, count);
+  scene.stop(); assert.equal(scene.request('Detection'), false);
+});
+
+test('Scene transport cancels pending local decoding and records muted scene cues', async () => {
+  const audio = new Audio(); audio.music = { has: () => true };
+  let resolve; audio.decode = () => new Promise(done => { resolve = done; });
+  const pending = audio.playMusic('Test');
+  const cues = []; audio.onMusicCue = cue => { cues.push(cue); return true; };
+  await audio.playMusic('Detection'); resolve({}); await pending;
+  assert.equal(audio.track, null); assert.equal(audio.ctx.sources.length, 0);
+  assert.equal(audio.requestedMusic, 'Detection'); assert.deepEqual(cues, ['Detection']);
+});

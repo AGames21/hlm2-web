@@ -139,7 +139,7 @@ Music works without the data WAD:
   **Load YouTube**, then press play in the embedded player. The search link helps
   find the game's soundtrack. Playback requires Internet access and a video whose
   owner permits embedding; availability and ads are controlled by YouTube. No
-  soundtrack files are downloaded into the project. Use the embedded volume control.
+  soundtrack files are downloaded into the project. The game volume control also applies once the YouTube API connects.
 - **Play music** plays an original generated synth loop immediately, without any
   files or network connection. It is a development fallback, not the game's music.
 - Load your own `hlm2_music_desktop.wad` by itself to choose and play tracks from
@@ -148,21 +148,17 @@ Music works without the data WAD:
   the generated loop provides background music instead. YouTube playback takes
   priority over in-game music until you close it or press **Play music**.
 
-### Soundtrack links (no music WAD needed)
+### Real soundtrack without a music WAD
 
-- [Hotline Miami 2 soundtrack on YouTube](https://www.youtube.com/watch?v=dEFcpyy_vq8),
-  listed in the [GetShitDoneMusic soundtrack index](https://github.com/2001db8/GetShitDoneMusic#readme).
-  Paste the video URL into **YouTube soundtrack**, click **Load YouTube**, then
-  press play inside the player.
-- [Find Hotline Miami 2 playlists in game order](https://www.youtube.com/results?search_query=Hotline+Miami+2+complete+soundtrack+in+game+order&sp=EgIQAw%3D%3D).
-  This is a playlist search, not a verified complete playlist: YouTube access was
-  blocked in the development environment, so current availability, completeness,
-  and track order could not be checked. Paste your chosen playlist's URL into
-  the same player and keep shuffle off to retain its order.
+Click **Play game soundtrack** to open the [Hotline Miami 2 soundtrack compilation](https://www.youtube.com/watch?v=dEFcpyy_vq8) in the visible YouTube player. If your browser blocks autoplay, press play inside it. This streams from YouTube; no soundtrack files are bundled or copied into this repository.
 
-YouTube playback runs independently of the game; it does not automatically
-switch or synchronize tracks when you change scenes. For scene-specific music,
-load your own music WAD when it is available.
+Enable **Follow scene music** to use the game's menu, intro-room, and level music cues. Floors and restarts using the same track keep its playback position. Tracks loop; intentional silent cues stop playback. The game's music volume/mute also control the connected YouTube player. A manually loaded video or playlist keeps playing independently until you enable scene following again or close it.
+
+**The built-in scene catalog is incomplete:** currently In the Face of Evil, Roller Mobster, and She Swallowed Burning Coals have sourced links. Other cues, including the prologue's Detection, need a saved link. Missing links show the exact track name and a **Find this track on YouTube** link. Select that track, paste its video URL, check **Save for scene track**, and click **Load YouTube**. The link and scene-following preference are remembered in this browser. You can also use a compilation's `?t=90&end=240` URL to loop a chapter, or a playlist URL with `&index=5` to select one song.
+
+[Scene order and track list](docs/soundtrack-order.md) · [Source references and verification limits](docs/music-sources.md) · [Find complete playlists in game order](https://www.youtube.com/results?search_query=Hotline+Miami+2+complete+soundtrack+in+game+order&sp=EgIQAw%3D%3D)
+
+YouTube access is blocked in the cloud development environment. The player and scene routing are tested with an IFrame API fixture; current video availability, embedding permission, playlist order, and live audio have **not** been verified. The compilation and playlist links are community sources, not a claim of an official or complete upload. Ads and availability are controlled by YouTube. Local WAD music remains available through **Play music**.
 
 ```bash
 node server.js "C:/Program Files (x86)/Steam/steamapps/common/Hotline Miami 2"

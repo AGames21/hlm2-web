@@ -7,7 +7,8 @@ import { play, musicFor } from './game.js';
 import { Audio, RemoteFile } from './audio.js';
 import { scoreScreen } from './score.js';
 import { frontEnd, card, abortMenu, STORY, progress, options } from './menu.js';
-import { youtubeEmbed } from './youtube.js';
+import { YouTubePlayer, youtubeTrack } from './youtube.js';
+import { SOUNDTRACK, SOUNDTRACK_MIX, SceneSoundtrack, trackLabel, trackSearch } from './soundtrack.js';
 import { drawRoomItems } from './render.js';
 import { setupFullscreen } from './fullscreen.js';
 import { setupSettings } from './settings.js';
@@ -49,7 +50,42 @@ async function load(key) {
 // --- Game data.
 let G = null;
 let audio = null;
-const getAudio = () => audio ||= new Audio();
+const getAudio = () => {
+  if (!audio) { audio = new Audio(); audio.onMusicCue = cue => soundtrack.request(cue); }
+  return audio;
+};
+const youtube = new YouTubePlayer($('youtube-slot'), message => { $('youtube-status').textContent = message; });
+let sceneLinks = {};
+try {
+  const saved = JSON.parse(localStorage.getItem('hlm2-youtube-scenes'));
+  for (const [cue, url] of Object.entries(saved || {})) {
+    if (!Object.hasOwn(SOUNDTRACK, cue)) continue;
+    try { youtubeTrack(url); sceneLinks[cue] = url; } catch {}
+  }
+} catch {}
+const soundtrack = new SceneSoundtrack({ player: youtube, sources: sceneLinks, onChange: syncSoundtrack });
+for (const cue of Object.keys(SOUNDTRACK)) $('youtube-cue').add(new Option(trackLabel(cue), cue));
+$('youtube-cue').value = 'Detection';
+try { if (localStorage.getItem('hlm2-youtube-follow') === 'true') soundtrack.mode = 'scene'; } catch {}
+function syncSoundtrack() {
+  const cue = soundtrack.cue;
+  $('youtube-current').textContent = `Scene music: ${trackLabel(cue)}`;
+  $('youtube-follow').checked = soundtrack.mode === 'scene';
+  try { localStorage.setItem('hlm2-youtube-follow', String(soundtrack.mode === 'scene')); } catch {}
+  $('youtube-close').hidden = soundtrack.mode === 'local';
+  $('youtube-open').hidden = !youtube.key;
+  if (youtube.url) $('youtube-open').href = youtube.url;
+  if (cue && Object.hasOwn(SOUNDTRACK, cue)) {
+    $('youtube-find').href = trackSearch(cue);
+    if (!$('youtube-controls').contains(document.activeElement)) $('youtube-cue').value = cue;
+  }
+  if (soundtrack.mode === 'scene' && !soundtrack.sources[cue]) {
+    $('youtube-status').textContent = cue
+      ? `No YouTube link saved for ${trackLabel(cue)}. Find this track and save its video link below to follow this scene automatically.`
+      : 'This scene has no music cue.';
+  }
+}
+syncSoundtrack();
 
 async function openGame(blob, progress = status) {
   const wad = await Wad.open(blob);
@@ -183,7 +219,7 @@ async function startPlay(name = $('room').value, carry = null, track) {
   if (!started) return false;
   if (request !== menuToken) { started.stop(); return false; }
   game = window.game = started;
-  G.audio.playMusic(!options.music ? null : track !== undefined ? track : musicFor(G.rooms, room));
+  G.audio.playMusic(track !== undefined ? track : musicFor(G.rooms, room));
   $('play').textContent = 'Stop';
   return true;
 }
@@ -429,36 +465,53 @@ $('music-track').onchange = async () => {
 };
 $('music-volume').oninput = e => { options.musicVolume = +e.target.value; options.save(); };
 function closeYouTube() {
-  $('youtube-slot').replaceChildren();
-  $('youtube-close').hidden = true;
+  soundtrack.stop();
   if (audio) audio.externalMusic = false;
-  $('youtube-status').textContent = 'Paste a soundtrack link, then press play in the player. No WAD needed.';
+  $('youtube-status').textContent = 'Play the game soundtrack, or save video links for automatic scene music. No music WAD needed.';
 }
-$('youtube-close').onclick = closeYouTube;
-$('youtube-form').onsubmit = async e => {
+$('youtube-close').onclick = () => { closeYouTube(); if (game) $('canvas').focus({ preventScroll: true }); };
+$('youtube-mix').onclick = () => {
+  const a = getAudio(); a.stopLocalMusic();
+  options.music = true; options.save();
+  soundtrack.manual(SOUNDTRACK_MIX);
+};
+$('youtube-follow').onchange = e => {
+  const a = getAudio(); a.stopLocalMusic();
+  if (e.target.checked) {
+    options.music = true; options.save();
+    soundtrack.enable(G ? a.requestedMusic : a.requestedMusic || 'Detection');
+  } else closeYouTube();
+};
+$('youtube-cue').onchange = () => {
+  $('youtube-find').href = trackSearch($('youtube-cue').value);
+};
+$('youtube-form').onsubmit = e => {
   e.preventDefault();
   try {
-    const url = youtubeEmbed($('youtube-url').value);
-    const a = getAudio();
-    a.externalMusic = false;
-    await a.playMusic(null);
-    a.externalMusic = true;
-    const frame = document.createElement('iframe');
-    frame.id = 'youtube-player';
-    frame.title = 'YouTube soundtrack player';
-    frame.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture';
-    frame.allowFullscreen = true;
-    frame.referrerPolicy = 'strict-origin-when-cross-origin';
-    frame.src = url;
-    $('youtube-slot').replaceChildren(frame);
-    $('youtube-close').hidden = false;
-    $('youtube-status').textContent = 'Press play in YouTube. Use its volume control. If embedding is unavailable, open the video on YouTube.';
+    const url = $('youtube-url').value.trim(), track = youtubeTrack(url);
+    if ($('youtube-save-scene').checked) {
+      if (!track.videoId && !new URL(url).searchParams.has('index')) throw new Error('For scene music, choose a single video or a playlist link with its track index.');
+      const cue = $('youtube-cue').value;
+      sceneLinks[cue] = url;
+      soundtrack.assign(cue, url);
+      try { localStorage.setItem('hlm2-youtube-scenes', JSON.stringify(sceneLinks)); }
+      catch { $('youtube-status').textContent = 'Link works for this visit; browser storage is unavailable.'; }
+      const a = getAudio(); a.stopLocalMusic();
+      options.music = true; options.save();
+      soundtrack.enable(G ? a.requestedMusic : a.requestedMusic || cue);
+      if (soundtrack.cue !== cue) $('youtube-status').textContent = `Saved ${trackLabel(cue)}. It will play when that scene starts.`;
+    } else {
+      const a = getAudio(); a.stopLocalMusic();
+      options.music = true; options.save();
+      soundtrack.manual(url);
+    }
     syncMusicButton();
   } catch (e) { $('youtube-status').textContent = e.message; }
 };
 setupFullscreen($('canvas'), $('view'), $('fullscreen'), $('fullscreen-exit'), status);
 const applySettings = () => {
   $('music-volume').value = options.musicVolume;
+  youtube.setVolume(options.musicVolume, options.music);
   $('zoom').value = options.zoom;
   const cv = $('canvas');
   cv.style.width = cv.width * options.zoom + 'px';
