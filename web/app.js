@@ -8,6 +8,8 @@ import { Audio, RemoteFile } from './audio.js';
 import { scoreScreen } from './score.js';
 import { frontEnd, card, abortMenu, STORY, progress, options } from './menu.js';
 import { youtubeEmbed } from './youtube.js';
+import { drawRoomItems } from './render.js';
+import { setupFullscreen } from './fullscreen.js';
 
 const $ = id => document.getElementById(id);
 const DATA_WAD = 'hlm2_data_desktop.wad';
@@ -138,7 +140,7 @@ async function drawRoom(room) {
   const c = room.colour;
   cx.fillStyle = `rgb(${c & 255},${(c >> 8) & 255},${(c >> 16) & 255})`;
   cx.fillRect(0, 0, room.w, room.h);
-  for (const i of items) cx.drawImage(imgs.get(i.atlas), i.sx, i.sy, i.w, i.h, i.dx, i.dy, i.w, i.h);
+  drawRoomItems(cx, items, imgs);
   cv.hidden = false;
   $('intro').hidden = true;
   status(`${room.name}: ${room.w}x${room.h}, ${room.tiles.length} tiles, ${room.insts.length} instances, atlas ${lvl || 'none'}` +
@@ -418,20 +420,7 @@ $('youtube-form').onsubmit = async e => {
     syncMusicButton();
   } catch (e) { $('youtube-status').textContent = e.message; }
 };
-const fullscreen = $('fullscreen');
-fullscreen.disabled = !document.fullscreenEnabled;
-if (fullscreen.disabled) fullscreen.title = 'Fullscreen is unavailable in this browser or embedded page.';
-fullscreen.onclick = async () => {
-  try {
-    if (document.fullscreenElement) await document.exitFullscreen();
-    else await document.documentElement.requestFullscreen();
-  } catch (e) { status('Fullscreen unavailable: ' + e.message); }
-};
-document.addEventListener('fullscreenchange', () => {
-  const active = !!document.fullscreenElement;
-  fullscreen.textContent = active ? 'Exit fullscreen' : 'Fullscreen';
-  fullscreen.setAttribute('aria-pressed', String(active));
-});
+setupFullscreen($('canvas'), $('view'), $('fullscreen'), $('fullscreen-exit'), status);
 $('play').onclick = () => G && (story = null, game ? (G.audio.playMusic(null), showSelected()) : startPlay().catch(e => { status('Play failed: ' + e.message); console.error(e); }));
 addEventListener('keydown', e => {
   if (e.target.closest?.('input, select, textarea, button') || e.target.isContentEditable) return;

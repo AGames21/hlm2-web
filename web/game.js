@@ -8,6 +8,8 @@
 // the henchman's bag), +-0.5 per step while a key is held, 0.5 friction per
 // step on release, then both speeds shrink by 0.98 while |hs|+|vs| exceeds
 // walk speed + 2, which caps diagonals. animSpeed is still a guess.
+import { drawRoomItems } from './render.js';
+
 export const MOVE = { accel: 0.5, maxSpeed: 3, friction: 0.5, diagSlack: 2, diagScale: 0.98, animSpeed: 0.25 };
 const VIEW_W = 480, VIEW_H = 270, STEP_MS = 1000 / 60;
 
@@ -668,7 +670,7 @@ export async function play(env) {
   const dynamic = new Set([spawn, ...enemies.map(e => e.inst), ...doors.map(d => d.inst), ...weapons.map(w => w.inst), ...exits.map(x => x.inst), ...elevators.map(l => l.inst), ...bosses.map(b => b.inst)]);
   const layer = (keep) => {
     const c = new OffscreenCanvas(room.w, room.h), cx = c.getContext('2d');
-    for (const i of items) if (keep(i) && !dynamic.has(i.inst)) cx.drawImage(imgs.get(i.atlas), i.sx, i.sy, i.w, i.h, i.dx, i.dy, i.w, i.h);
+    drawRoomItems(cx, items, imgs, keep, dynamic);
     return c;
   };
   const under = layer(i => i.depth >= pobj.depth), over = layer(i => i.depth < pobj.depth);

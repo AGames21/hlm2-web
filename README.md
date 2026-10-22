@@ -107,9 +107,10 @@ rooms, and the censor option's effect.
 ## Run
 
 For code-only development, run `node server.js` (no dependency install or build).
-Run the music and embed regression checks with `node --test tests/music.test.mjs`.
-The **Fullscreen** button fits the canvas to the screen while keeping controls
-available; use **Exit fullscreen** or Escape to leave.
+Run the regression checks with `node --test tests/*.test.mjs`.
+The **Fullscreen** button enlarges the game to fit the screen, hides the toolbars,
+and preserves the image's proportions. Use the floating **Exit fullscreen** button
+or Escape to leave. A playing YouTube video stays available in a small overlay.
 
 Music works without the data WAD:
 - Paste a YouTube video or playlist URL into **YouTube soundtrack**, click
