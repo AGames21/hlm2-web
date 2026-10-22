@@ -251,6 +251,7 @@ export const BEAR = { introX: 224, stopY: 248, walkUp: 2, legSpeed: 0.3, eat: 12
 // as with the bear; touching the player swaps both for the kill animation
 // halfway between them. The room has no player instance: the player starts
 // by the exit on the right. The kill animation's speed is a guess.
+const BOSS_WHO = { objBearBoss: 'objSon', objPrisonBoss: 'objRatPrison' };
 export const PRISON = { introX: 336, walkLeft: 1.5, legSpeed: 0.125, talk: 90, first: 40, rest: 30, reach: 16, enter: { x: 520, y: 176 },
   walk: { accel: 0.1, max: 2, anim: 0.1, legs: 0.15, time: 240 }, chargeUp: { to: 3, anim: 0.1, time: 60 },
   charge: { speed: 3.75, turn: 2.25, anim: 0.075, legs: 0.15, time: 120 }, body: { speed: 2, friction: 0.1 }, killSpeed: 0.2,
@@ -495,7 +496,11 @@ export async function play(env) {
   const { G, room, items, imgs, canvas, zoom } = env;
   const sfx = name => G.audio?.play(name);
   const spawn = findPlayer(G, room);
-  const pobj = spawn ? G.objects.get(spawn.obj) : G.objects.list.find(o => o.name === 'objPigButcher');
+  // The boss rooms have no player instance; the boss names the character
+  // (the bear's step sets sprSonWalkUnarmed). Otherwise the Pig.
+  const byName = n => n && G.objects.list.find(o => o.name === n);
+  const bossWho = room.insts.map(i => BOSS_WHO[G.objects.get(i.obj)?.name]).find(Boolean);
+  const pobj = spawn ? G.objects.get(spawn.obj) : byName(bossWho) || byName('objPigButcher');
   const sprByName = new Map(G.sprites.list.map(s => [s.name, s]));
   const art = new Map();
   const need = (name) => {
@@ -521,7 +526,7 @@ export async function play(env) {
     const attack = need(pre + 'Attack' + name) || need(pre + 'Attack' + name + '1');
     if (walk && attack) arm[name] = { ...g, gun: true, walk, attack, attack2: need(pre + 'Attack' + name + '2') || attack, kill: P.stomp };
   }
-  P.deadShot = need(pre + 'DeadShot');
+  P.deadShot = need(pre + 'DeadShot') || need(pre + 'DeadShotgun');
   P.deadBlunt = need(pre + 'DeadBlunt') || P.deadShot;
   const bulletSprite = need('sprBullet'), clearedArt = art.get(need(CLEARED.sprite)), leaveSprite = Object.fromEntries(Object.entries(IDLE.leave).map(([k, v]) => [k, need(v.sprite)]));
   const box = maskBox(G, pobj);
