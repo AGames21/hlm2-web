@@ -3,7 +3,7 @@
 // Music/<Name>.ogg in hlm2_music_desktop.wad, which is optional.
 
 export class Audio {
-  constructor(wad, table) {
+  constructor(wad = null, table = new Map()) {
     this.wad = wad;
     this.table = table;
     this.music = null;
@@ -15,6 +15,8 @@ export class Audio {
     this.mus.connect(this.ctx.destination);
     this.buffers = new Map();
     this.track = null;
+    this.requestedMusic = null;
+    this.demo = null;
     // Browsers keep the context suspended until the page gets a gesture.
     const wake = () => this.ctx.state === 'suspended' && this.ctx.resume();
     addEventListener('pointerdown', wake);
@@ -47,15 +49,20 @@ export class Audio {
 
   // Loop one music track; the same name keeps playing, null stops.
   async playMusic(name) {
+    this.requestedMusic = name;
+    if (this.externalMusic) return;
     if (this.track?.name === name) return;
-    this.track?.src.stop();
+    this.track?.src?.stop();
     this.track = null;
     const file = name && `Music/${name}.ogg`;
-    if (!file || !this.music?.has(file)) return;
-    const track = { name, src: this.ctx.createBufferSource() };
+    if (!name) return;
+    const track = { name, src: null };
     this.track = track;
-    const buf = await this.decode(this.music, file);
-    if (!buf || this.track !== track) return;
+    const buf = name === '@original' || !this.music?.has(file)
+      ? (this.demo ||= makeDemo(this.ctx)) : await this.decode(this.music, file);
+    if (this.track !== track) return;
+    if (!buf) { this.track = null; return false; }
+    track.src = this.ctx.createBufferSource();
     track.src.buffer = buf;
     track.src.loop = true;
     track.src.connect(this.mus);
@@ -63,6 +70,35 @@ export class Audio {
     // Decoded tracks are 30-60 MB of PCM each; keep only the one playing.
     for (const f of this.buffers.keys()) if (f.startsWith('Music/') && f !== file) this.buffers.delete(f);
   }
+}
+
+// An original four-bar synth loop, generated locally; no game assets or downloads.
+function makeDemo(ctx) {
+  const beat = 60 / 112, duration = beat * 16, rate = ctx.sampleRate;
+  const buffer = ctx.createBuffer(1, Math.ceil(duration * rate), rate);
+  const out = buffer.getChannelData(0);
+  const notes = [33, 33, 36, 31];
+  let seed = 7;
+  const noise = () => { seed = (Math.imul(seed, 1664525) + 1013904223) | 0; return (seed >>> 0) / 2147483648 - 1; };
+  for (let i = 0; i < out.length; i++) {
+    const t = i / rate, step = Math.floor(t / (beat / 2)), phase = t % (beat / 2);
+    const bar = Math.min(3, Math.floor(t / (beat * 4)));
+    const bass = 440 * 2 ** ((notes[bar] - 69) / 12);
+    const arp = bass * 4 * [1, 1.5, 2, 2.5, 2, 1.5, 1.25, 1.5][step % 8];
+    const kickTime = t % beat, snareTime = t % (beat * 2) - beat;
+    const duck = 0.35 + 0.65 * Math.min(1, kickTime / 0.15);
+    let sample = 0.22 * Math.sin(2 * Math.PI * (48 * kickTime + 8 * (1 - Math.exp(-35 * kickTime)))) * Math.exp(-16 * kickTime);
+    sample += 0.17 * Math.tanh(2 * Math.sin(2 * Math.PI * bass * t)) * Math.exp(-8 * phase) * duck;
+    sample += 0.07 * Math.sin(2 * Math.PI * arp * phase) * Math.exp(-18 * phase) * duck;
+    const n = noise();
+    sample += 0.055 * n * Math.exp(-90 * phase);
+    if (snareTime >= 0) sample += 0.13 * n * Math.exp(-22 * snareTime);
+    out[i] = sample;
+  }
+  // Avoid a click when the loop wraps.
+  const fade = Math.min(256, out.length / 2);
+  for (let i = 0; i < fade; i++) { out[i] *= i / fade; out[out.length - 1 - i] *= i / fade; }
+  return buffer;
 }
 
 // A Blob stand-in over HTTP Range requests, so the 488 MB music wad is read

@@ -101,6 +101,7 @@ function tile(cx, s, alpha, ox = 0, oy = 0) {
 function input(canvas) {
   const q = [];
   const key = e => {
+    if (e.target.closest?.('input, select, textarea, button') || e.target.isContentEditable) return;
     if (e.repeat && !/Arrow/.test(e.key)) return;
     const k = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', w: 'up', s: 'down', a: 'left', d: 'right',
       Enter: 'ok', ' ': 'ok', Escape: 'back', Backspace: 'back' }[e.key];

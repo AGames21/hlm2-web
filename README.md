@@ -106,6 +106,41 @@ rooms, and the censor option's effect.
 
 ## Run
 
+For code-only development, run `node server.js` (no dependency install or build).
+Run the music and embed regression checks with `node --test tests/music.test.mjs`.
+The **Fullscreen** button fits the canvas to the screen while keeping controls
+available; use **Exit fullscreen** or Escape to leave.
+
+Music works without the data WAD:
+- Paste a YouTube video or playlist URL into **YouTube soundtrack**, click
+  **Load YouTube**, then press play in the embedded player. The search link helps
+  find the game's soundtrack. Playback requires Internet access and a video whose
+  owner permits embedding; availability and ads are controlled by YouTube. No
+  soundtrack files are downloaded into the project. Use the embedded volume control.
+- **Play music** plays an original generated synth loop immediately, without any
+  files or network connection. It is a development fallback, not the game's music.
+- Load your own `hlm2_music_desktop.wad` by itself to choose and play tracks from
+  the **Track** selector. It is remembered in this browser when storage allows.
+  Loading the data WAD later enables gameplay. When a scene's track is unavailable,
+  the generated loop provides background music instead. YouTube playback takes
+  priority over in-game music until you close it or press **Play music**.
+
+### Soundtrack links (no music WAD needed)
+
+- [Hotline Miami 2 soundtrack on YouTube](https://www.youtube.com/watch?v=dEFcpyy_vq8),
+  listed in the [GetShitDoneMusic soundtrack index](https://github.com/2001db8/GetShitDoneMusic#readme).
+  Paste the video URL into **YouTube soundtrack**, click **Load YouTube**, then
+  press play inside the player.
+- [Find Hotline Miami 2 playlists in game order](https://www.youtube.com/results?search_query=Hotline+Miami+2+complete+soundtrack+in+game+order&sp=EgIQAw%3D%3D).
+  This is a playlist search, not a verified complete playlist: YouTube access was
+  blocked in the development environment, so current availability, completeness,
+  and track order could not be checked. Paste your chosen playlist's URL into
+  the same player and keep shuffle off to retain its order.
+
+YouTube playback runs independently of the game; it does not automatically
+switch or synchronize tracks when you change scenes. For scene-specific music,
+load your own music WAD when it is available.
+
 ```bash
 node server.js "C:/Program Files (x86)/Steam/steamapps/common/Hotline Miami 2"
 ```

@@ -700,6 +700,7 @@ export async function play(env) {
   const mouse = { x: VIEW_W / 2, y: VIEW_H / 2, click: false, right: false };
   const cam = { x: 0, y: 0, shake: 0 };
   const onKey = (e) => {
+    if (e.type === 'keydown' && (e.target.closest?.('input, select, textarea, button') || e.target.isContentEditable)) return;
     const k = e.key.toLowerCase();
     if (!['w', 'a', 's', 'd', ' ', 'r', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) return;
     e.preventDefault();

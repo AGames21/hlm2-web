@@ -7,6 +7,7 @@ import { play, musicFor } from './game.js';
 import { Audio, RemoteFile } from './audio.js';
 import { scoreScreen } from './score.js';
 import { frontEnd, card, abortMenu, STORY, progress, options } from './menu.js';
+import { youtubeEmbed } from './youtube.js';
 
 const $ = id => document.getElementById(id);
 const DATA_WAD = 'hlm2_data_desktop.wad';
@@ -44,6 +45,8 @@ async function load(key) {
 
 // --- Game data.
 let G = null;
+let audio = null;
+const getAudio = () => audio ||= new Audio();
 
 async function openGame(blob) {
   const wad = await Wad.open(blob);
@@ -56,7 +59,7 @@ async function openGame(blob) {
   const game = {
     wad, sprites: T.sprites(spr), objects: T.objects(obj), backgrounds: T.backgrounds(bgs),
     rooms: T.rooms(rms), levelAtlas: T.levelAtlases(lvl), masks: T.collisionMasks(msk),
-    frames: new Map(), images: new Map(), audio: new Audio(wad, T.sounds(snd)),
+    frames: new Map(), images: new Map(),
   };
   // Index every atlas frame by sprite name: name -> [{atlas, frames}].
   const metas = wad.names('Atlases/').filter(n => n.endsWith('.meta'));
@@ -70,6 +73,9 @@ async function openGame(blob) {
     }));
     status(`Indexing atlases ${Math.min(i + 64, metas.length)}/${metas.length}`);
   }
+  game.audio = getAudio();
+  game.audio.wad = wad;
+  game.audio.table = T.sounds(snd);
   return game;
 }
 
@@ -292,6 +298,7 @@ function fillRooms() {
 }
 
 async function showSelected() {
+  if (!G) return;
   stopPlay();
   const room = G.rooms.list.find(r => r.name === $('room').value);
   if (!room) return;
@@ -306,37 +313,128 @@ async function showSelected() {
 
 async function start(blob) {
   status('Reading wad index...');
+  stopPlay();
+  getAudio().playMusic(null);
   G = window.G = await openGame(blob);
+  $('menu').disabled = $('play').disabled = false;
   fillRooms();
   if (!location.hash || location.hash === '#menu') showMenu();
   else await showSelected();
 }
 
-// The music wad is optional; without it the game plays with effects only.
+// Music is independent of the game data and can be used as a standalone player.
 async function setMusic(blob) {
-  G.audio.music = await Wad.open(blob);
+  const wad = await Wad.open(blob);
+  const names = wad.names('Music/').filter(n => n.endsWith('.ogg')).sort();
+  if (!names.length) throw new Error('No OGG music tracks in this WAD');
+  const a = getAudio(), requested = a.requestedMusic;
+  await a.playMusic(null);
+  a.music = wad;
+  for (const key of a.buffers.keys()) if (key.startsWith('Music/')) a.buffers.delete(key);
+  $('music-track').length = 1;
+  for (const name of names) {
+    const track = name.slice(6, -4);
+    $('music-track').add(new Option(track, track));
+  }
+  $('music-track').value = names[0].slice(6, -4);
+  $('music-status').textContent = `${names.length} music tracks loaded.`;
+  if (requested) await a.playMusic(requested);
 }
 
 $('pick').onchange = async e => {
   const files = [...e.target.files];
-  const data = files.find(f => f.name !== MUSIC_WAD), music = files.find(f => f.name === MUSIC_WAD);
+  const data = files.find(f => f.name.toLowerCase() === DATA_WAD), music = files.find(f => f.name.toLowerCase() === MUSIC_WAD);
   try {
+    if (!data && !music) throw new Error(`Choose ${DATA_WAD} or ${MUSIC_WAD}`);
+    if (music) {
+      await setMusic(music);
+      await store(MUSIC_WAD, music).catch(() => { $('music-status').textContent += ' Browser storage unavailable; reload the file next visit.'; });
+    }
     if (data) {
       await start(data);
-      await store(DATA_WAD, data);
-    }
-    if (music && G) {
-      await setMusic(music);
-      await store(MUSIC_WAD, music);
-      status('Music loaded.');
+      await store(DATA_WAD, data).catch(() => status('Game loaded; browser storage unavailable.'));
     }
   } catch (err) {
     status('Could not read that file: ' + err.message);
     console.error(err);
+  } finally {
+    e.target.value = '';
   }
 };
+$('music-play').onclick = async () => {
+  const button = $('music-play');
+  button.disabled = true;
+  try {
+    closeYouTube();
+    const a = getAudio();
+    await a.ctx.resume();
+    const stop = !!a.track;
+    if (await a.playMusic(stop ? null : $('music-track').value) === false) throw new Error('Could not decode music');
+    $('music-status').textContent = stop ? 'Music stopped.' : `Playing: ${$('music-track').selectedOptions[0].textContent}`;
+  } catch (e) { $('music-status').textContent = 'Music failed: ' + e.message; }
+  finally { button.disabled = false; syncMusicButton(); }
+};
+function syncMusicButton() {
+  const playing = !!audio?.track;
+  $('music-play').textContent = playing ? 'Stop music' : 'Play music';
+  $('music-play').setAttribute('aria-pressed', String(playing));
+}
+// Game menus also change tracks, so keep the standalone controls in sync.
+setInterval(syncMusicButton, 250);
+$('music-track').onchange = async () => {
+  if (!audio?.track) return;
+  try {
+    await audio.ctx.resume();
+    if (await audio.playMusic($('music-track').value) === false) throw new Error('Could not decode music');
+    $('music-status').textContent = `Playing: ${$('music-track').selectedOptions[0].textContent}`;
+  } catch (e) { $('music-status').textContent = 'Music failed: ' + e.message; }
+};
+$('music-volume').oninput = e => { getAudio().mus.gain.value = +e.target.value / 100; };
+function closeYouTube() {
+  $('youtube-slot').replaceChildren();
+  $('youtube-close').hidden = true;
+  if (audio) audio.externalMusic = false;
+  $('youtube-status').textContent = 'Paste a soundtrack link, then press play in the player. No WAD needed.';
+}
+$('youtube-close').onclick = closeYouTube;
+$('youtube-form').onsubmit = async e => {
+  e.preventDefault();
+  try {
+    const url = youtubeEmbed($('youtube-url').value);
+    const a = getAudio();
+    a.externalMusic = false;
+    await a.playMusic(null);
+    a.externalMusic = true;
+    const frame = document.createElement('iframe');
+    frame.id = 'youtube-player';
+    frame.title = 'YouTube soundtrack player';
+    frame.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture';
+    frame.allowFullscreen = true;
+    frame.referrerPolicy = 'strict-origin-when-cross-origin';
+    frame.src = url;
+    $('youtube-slot').replaceChildren(frame);
+    $('youtube-close').hidden = false;
+    $('youtube-status').textContent = 'Press play in YouTube. Use its volume control. If embedding is unavailable, open the video on YouTube.';
+    syncMusicButton();
+  } catch (e) { $('youtube-status').textContent = e.message; }
+};
+const fullscreen = $('fullscreen');
+fullscreen.disabled = !document.fullscreenEnabled;
+if (fullscreen.disabled) fullscreen.title = 'Fullscreen is unavailable in this browser or embedded page.';
+fullscreen.onclick = async () => {
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else await document.documentElement.requestFullscreen();
+  } catch (e) { status('Fullscreen unavailable: ' + e.message); }
+};
+document.addEventListener('fullscreenchange', () => {
+  const active = !!document.fullscreenElement;
+  fullscreen.textContent = active ? 'Exit fullscreen' : 'Fullscreen';
+  fullscreen.setAttribute('aria-pressed', String(active));
+});
 $('play').onclick = () => G && (story = null, game ? (G.audio.playMusic(null), showSelected()) : startPlay().catch(e => { status('Play failed: ' + e.message); console.error(e); }));
 addEventListener('keydown', e => {
+  if (e.target.closest?.('input, select, textarea, button') || e.target.isContentEditable) return;
   if (e.key === 'Escape' && game) story ? showMenu() : showSelected();
   if (e.key === 'Enter' && game && story?.intro) { e.preventDefault(); startLevel(); }
 });
@@ -349,20 +447,24 @@ $('hidden').onchange = showSelected;
 // Startup: a wad saved earlier in this browser, else one served next to the
 // page by a private server (see server.js), else wait for the user to pick.
 (async () => {
+  // Restore music even when there is no data WAD. Storage failure must not
+  // prevent trying the supported private-server route.
   try {
-    let blob = await load(DATA_WAD);
+    const music = await load(MUSIC_WAD).catch(() => null) || await RemoteFile.open('game/' + MUSIC_WAD).catch(() => null);
+    if (music) await setMusic(music);
+  } catch (e) { $('music-status').textContent = 'Could not restore music: ' + e.message; }
+  try {
+    let blob = await load(DATA_WAD).catch(() => null);
     if (!blob) {
       const res = await fetch('game/' + DATA_WAD).catch(() => null);
       if (res && res.ok) {
         status('Downloading game data from this server...');
         blob = await res.blob();
-        await store(DATA_WAD, blob);
+        await store(DATA_WAD, blob).catch(() => {});
       }
     }
     if (!blob) return;
     await start(blob);
-    const music = await load(MUSIC_WAD) || await RemoteFile.open('game/' + MUSIC_WAD).catch(() => null);
-    if (music) await setMusic(music);
   } catch (e) {
     status('Startup failed: ' + e.message);
     console.error(e);
