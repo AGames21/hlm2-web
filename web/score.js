@@ -1,8 +1,9 @@
 // Level-end screen: "LEVEL CLEARED" and the level's tally, drawn with the
 // game's own bitmap fonts (BMFont XML + page PNG under Fonts/ in the wad).
 // objScoreScreen (create 0xb5f5e0, step 0xb68880, draw 0xb61940) is too big
-// to port yet; its points (kills, combo, flexibility, mobility, boldness,
-// time bonus) are not decoded, so this shows only what is counted for sure.
+// to port yet. Its level score is the sum of globals 0x1470, 0x1790, 0x10a0,
+// 0x1780, 0x1770, 0x16b0 and the kill points 0xd90; only the kill points are
+// counted here, so LEVEL SCORE is the kill points alone for now.
 
 const fonts = new Map();
 
@@ -59,8 +60,8 @@ export function drawText(cx, f, s, x, y, { align = 0, colour = '#fff', scale = 1
   }
 }
 
-// Two of the score screen's labels in hlm2_localization.bin.
-const LABEL = { kills: 'KILLS', time: 'TIME' };
+// Three of the score screen's labels in hlm2_localization.bin.
+const LABEL = { kills: 'KILLS', time: 'TIME', score: 'LEVEL SCORE' };
 const COLOURS = ['#ff2ad4', '#2af6ff', '#ffe02a'];
 
 const clock = steps => {
@@ -72,7 +73,7 @@ const clock = steps => {
 export async function scoreScreen(G, canvas, level, stats) {
   const [title, big, small] = await Promise.all(['fntLevelClear', 'fntScore', 'fntScoreSmall'].map(n => loadFont(G, n)));
   const cx = canvas.getContext('2d'), W = canvas.width, H = canvas.height;
-  const rows = [[LABEL.kills, String(stats.kills)], [LABEL.time, clock(stats.steps)]];
+  const rows = [[LABEL.kills, String(stats.kills)], [LABEL.time, clock(stats.steps)], [LABEL.score, (stats.score ?? 0) + 'pts']];
   let t = 0, done = false, resolve;
   const draw = () => {
     if (done) return;

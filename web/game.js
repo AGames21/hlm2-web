@@ -213,7 +213,21 @@ export const FAT = { hp: 5, bleed: 100, kinds: {
   objSoldierFatGun: { walk: 'sprFatSoldierWalkGun', attack: 'sprFatSoldierAttackGun', legs: 'sprFatSoldierLegs', die: 'sprFatSoldierDying', gun: 'FatGun' },
   objFatPolice: { walk: 'sprFatPoliceWalk', attack: 'sprFatPoliceAttack', die: 'sprFatPoliceDying' },
   objPrisonerFat: { walk: 'sprPrisonerWalkFat', attack: 'sprPrisonerAttackFat', legs: 'sprPrisonerFatLegs', die: 'sprPrisonerDieFat' },
+  objFatMafiaLSD: { walk: 'sprFatMafiaLSDWalk', attack: 'sprFatMafiaLSDAttack', legs: 'sprEMafiaFatLegs', die: 'sprFatMafiaLSDDie', burst: true },
 } };
+// objFatMafiaLSD (create 0x7a8500, step 0x7a9f50): the shared fat step until
+// it dies; then sprFatMafiaLSDDie plays at image_speed 0.2 and from frame 7
+// it bursts: a sprSonDeadExplode body, 20 pieces flung at x/y +-16 with
+// speed 2 + random(3) and friction 0.15, screen shake 8. The pieces' object
+// is not read; sprTinyBlood stands in for it.
+export const BURST = { speed: 0.2, at: 7, body: 'sprSonDeadExplode', pieces: 20, spread: 16, speedMin: 2, speedRand: 3, friction: 0.15, piece: 'sprTinyBlood', shake: 8 };
+
+// Points, as the exe adds them to the score (global 0xd90):
+// execution 800 (KnockedOut step 0x8a0fa0, which also makes the "800pts"
+// text), shooting a knocked-out body 600 (0x89dbe0), a fat enemy's death 800
+// (fat step 0x11a1ee0), a thrown knife kill 800 (0x8a3fe0). A standing kill
+// adds through helpers whose values are not read; 400 is a guess.
+export const POINTS = { exec: 800, downed: 600, fat: 800, kill: 400, popup: 60 };
 // Dodgers (objColombianDodger/objGangDodger/objSoldierDodger, one step code):
 // unarmed chasers on the gang AI (0xd96830). A bullet, or a weapon flying
 // faster than 4, starts sprDodger*Dodge at frame 0 and stops them; one landing
@@ -530,7 +544,8 @@ export async function play(env) {
     const fat = FAT.kinds[o.name];
     const armed = (fat || FACTION.test(o.name)) && (fat ? 'Unarmed' : (sname.match(/Walk(\w+)$/) || [])[1]);
     if (fat) {
-      Object.assign(e, { fat: true, hp: FAT.hp, bleed: FAT.bleed });
+      Object.assign(e, { fat: true, hp: FAT.hp, bleed: FAT.bleed, burst: !!fat.burst });
+      if (fat.burst) { need(BURST.body); need(BURST.piece); }
       e.spr.walk = need(fat.walk || base + 'Walk'); e.spr.die = need(fat.die || base + 'Die');
       e.spr.attack = need(fat.attack || base + 'Attack'); e.spr.legs = fat.legs ? need(fat.legs) : need(base + 'Legs');
       e.spr.idle = e.spr.walk;
@@ -617,7 +632,14 @@ export async function play(env) {
   // Coming up from the floor before, the player stays where they were.
   const carry = env.carry;
   // The level's tally so far: kills and steps, from the floors before.
-  const stats = { kills: 0, steps: 0, ...carry?.stats };
+  const stats = { kills: 0, steps: 0, score: 0, ...carry?.stats };
+  // The HUD's score counts up toward the real one; popups are the "Npts" texts.
+  let shownScore = stats.score;
+  const popups = [], pieces = [];
+  const award = (pts, x, y) => {
+    stats.score += pts;
+    popups.push({ text: pts + 'pts', x, y, t: POINTS.popup });
+  };
   const clear = (x, y) => carry || spawn || enemies.every(e => Math.hypot(e.x - x, e.y - y) > 64);
   const lift = carry?.elevator && elevators.reduce((a, l) => !a || Math.abs(l.x - carry.elevator.x) < Math.abs(a.x - carry.elevator.x) ? l : a, null);
   if (lift) { carry.x = lift.to.x; carry.y = lift.to.y; }
@@ -694,7 +716,7 @@ export async function play(env) {
     sfx(sound);
     enemies.splice(enemies.indexOf(e), 1);
     dropGun(e);
-    kos.push({ obj: e.obj, x: e.x, y: e.y, dir, speed: random(KO.speedRand) + KO.speedMin, angle: dir, sprite: e.spr.getUp, spr: e.spr,
+    kos.push({ obj: e.obj, isEnemy: e.isEnemy, x: e.x, y: e.y, dir, speed: random(KO.speedRand) + KO.speedMin, angle: dir, sprite: e.spr.getUp, spr: e.spr,
       frame: 1, imageSpeed: 0, alarm: Math.floor(random(KO.waitRand)) + KO.waitMin, box: e.box, gun: e.gun });
     cam.shake = KO.shake;
   }
@@ -711,12 +733,13 @@ export async function play(env) {
   // one at random is a guess.
   function shoot(e, dir, shotgun, sprite) {
     if (e.fat && --e.hp > 0) return;
-    if (e.isEnemy) stats.kills++;
     const k = enemies.includes(e) ? enemies : kos;
+    if (e.isEnemy) { stats.kills++; award(e.fat ? POINTS.fat : k === kos ? POINTS.downed : POINTS.kill, e.x, e.y); }
     k.splice(k.indexOf(e), 1);
     dropGun(e);
     const s = sprite || (shotgun && e.spr.deadShotgun) || e.spr.deadShot;
-    if (e.fat) dead.push({ x: e.x, y: e.y, angle: e.angle, sprite: s, frame: 1, imageSpeed: 0 });
+    if (e.burst) dead.push({ x: e.x, y: e.y, angle: e.angle, sprite: s, frame: 0, imageSpeed: BURST.speed, burst: true });
+    else if (e.fat) dead.push({ x: e.x, y: e.y, angle: e.angle, sprite: s, frame: 1, imageSpeed: 0 });
     else if (s) dead.push({ x: e.x, y: e.y, angle: dir, sprite: s, frame: Math.floor(random(frames(s))), imageSpeed: 0 });
     else if (e.spr.killStomp) dead.push({ x: e.x, y: e.y, angle: dir, sprite: e.spr.killStomp, frame: frames(e.spr.killStomp) - 1, imageSpeed: 0 });
   }
@@ -788,7 +811,7 @@ export async function play(env) {
     const body = blunt ? e.spr.killBlunt : e.spr.killStomp, kill = held() ? held().kill : P.stomp;
     if (!body || !kill) return;
     kos.splice(kos.indexOf(k), 1);
-    if (k.isEnemy) stats.kills++;
+    if (k.isEnemy) { stats.kills++; award(POINTS.exec, k.x, k.y); }
     const d = { x: k.x, y: k.y, angle: k.angle, sprite: body, frame: 0, imageSpeed: EXEC.imageSpeed * frames(body) / frames(kill) };
     dead.push(d);
     p.exec = { x: k.x, y: k.y, angle: k.angle + 180, sprite: kill, frame: 0, body: d };
@@ -1144,6 +1167,17 @@ export async function play(env) {
     else for (const e of enemies) if (touches(d, e, e.box)) { pushDoor(d, e, false); break; }
   }
 
+  // objFatMafiaLSD's death: the die animation, then the burst at frame 7.
+  function stepBurst(d) {
+    d.frame = Math.min(d.frame + d.imageSpeed, frames(d.sprite) - 1);
+    if (d.frame < BURST.at) return;
+    Object.assign(d, { burst: false, sprite: BURST.body, frame: 0, imageSpeed: 0 });
+    for (let i = 0; i < BURST.pieces; i++)
+      pieces.push({ x: d.x + random(2 * BURST.spread) - BURST.spread, y: d.y + random(2 * BURST.spread) - BURST.spread,
+        dir: random(360), angle: random(360), speed: BURST.speedMin + random(BURST.speedRand) });
+    cam.shake = Math.max(cam.shake, BURST.shake);
+  }
+
   function step() {
     if (!p.dead) stats.steps++;
     stepPlayer();
@@ -1152,6 +1186,13 @@ export async function play(env) {
     for (const d of doors) stepDoor(d);
     for (const w of weapons) stepWeapon(w);
     for (const b of [...bullets]) if (!stepBullet(b)) bullets.splice(bullets.indexOf(b), 1);
+    for (const d of dead) if (d.burst) stepBurst(d);
+    for (const q of pieces) if (q.speed > 0) {
+      q.x += lenX(q.speed, q.dir); q.y += lenY(q.speed, q.dir);
+      q.speed = Math.max(0, q.speed - BURST.friction);
+    }
+    for (const u of [...popups]) if (--u.t <= 0) popups.splice(popups.indexOf(u), 1); else u.y -= 0.3;
+    if (shownScore < stats.score) shownScore = Math.min(stats.score, shownScore + Math.max(10, Math.ceil((stats.score - shownScore) / 10)));
     pressed.clear();
     stepExits();
     if (!running) return;
@@ -1174,6 +1215,24 @@ export async function play(env) {
     cx.restore();
   }
 
+  function hud() {
+    cx.save();
+    cx.font = 'bold 10px monospace';
+    cx.textAlign = 'center';
+    for (const u of popups) {
+      cx.globalAlpha = Math.min(1, u.t / 20);
+      cx.fillStyle = '#000'; cx.fillText(u.text, Math.round(u.x - cam.x) + 1, Math.round(u.y - cam.y) + 1);
+      cx.fillStyle = '#fff'; cx.fillText(u.text, Math.round(u.x - cam.x), Math.round(u.y - cam.y));
+    }
+    cx.globalAlpha = 1;
+    cx.font = 'bold 14px monospace';
+    cx.textAlign = 'right';
+    const t = shownScore + 'pts';
+    cx.fillStyle = '#000'; cx.fillText(t, VIEW_W - 7, 19);
+    cx.fillStyle = '#ff2ad4'; cx.fillText(t, VIEW_W - 8, 18);
+    cx.restore();
+  }
+
   function draw() {
     const c = room.colour;
     const sx = Math.round((Math.random() * 2 - 1) * cam.shake), sy = Math.round((Math.random() * 2 - 1) * cam.shake);
@@ -1183,6 +1242,7 @@ export async function play(env) {
     cx.fillRect(-4, -4, VIEW_W + 8, VIEW_H + 8);
     cx.drawImage(under, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
     for (const d of dead) sprite(d.sprite, d.frame, d.x, d.y, -d.angle * RAD);
+    for (const q of pieces) sprite(BURST.piece, 0, q.x, q.y, -q.angle * RAD);
     for (const l of elevators) sprite(l.sprite, Math.floor(l.frame), l.x, l.y, 0);
     for (const k of kos) sprite(k.sprite, k.frame, k.x, k.y, -k.angle * RAD);
     for (const w of weapons) sprite(w.sprite, 0, w.x, w.y, -w.angle * RAD);
@@ -1200,14 +1260,15 @@ export async function play(env) {
     }
     if (p.dead) {
       sprite(p.dead.sprite, p.dead.frame, p.x, p.y, -p.dead.angle * RAD);
-      cx.drawImage(over, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H); cx.restore(); return;
+      cx.drawImage(over, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H); cx.restore(); hud(); return;
     }
-    if (p.exec) { sprite(p.exec.sprite, p.exec.frame, p.x, p.y, -p.exec.angle * RAD); cx.drawImage(over, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H); cx.restore(); return; }
+    if (p.exec) { sprite(p.exec.sprite, p.exec.frame, p.x, p.y, -p.exec.angle * RAD); cx.drawImage(over, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H); cx.restore(); hud(); return; }
     const moving = p.hs || p.vs;
     sprite(P.legs, moving ? p.frame : 0, p.x, p.y, p.dir);
     sprite(p.sprite, attacking() ? p.attackFrame : moving ? p.frame : 0, p.x, p.y, p.aim);
     cx.drawImage(over, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
     cx.restore();
+    hud();
     if (cleared && exits.length + elevators.length && clearedArt) {
       const f = clearedArt.hit.frames[0];
       cx.drawImage(imgs.get(clearedArt.hit.atlas), f.x, f.y, f.w, f.h, Math.round((VIEW_W - f.w) / 2), VIEW_H - CLEARED.bottom, f.w, f.h);
