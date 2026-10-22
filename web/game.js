@@ -241,6 +241,20 @@ export const BEAR = { introX: 224, stopY: 248, walkUp: 2, legSpeed: 0.3, eat: 12
   near: 96, walk: { accel: 0.15, max: 1, anim: 0.15 }, run: { accel: 0.5, max: 4, anim: 0.1 }, reach: 12,
   body: { speedMin: 2, speedRand: 1, friction: 0.15 }, killSpeed: 3, killFrame: 10, killFriction: 0.15,
   spr: { eat: 'sprBearBossEat', rise: 'sprBearBossRise', walk: 'sprBearBossWalk', run: 'sprBearBossRun', dead: 'sprBearBossDead', kill: 'sprPlayerDeadDog' } };
+// objPrisonBoss (create 0x99f130, step 0x99fd00, player collision 0x99e870).
+// Intro: a player right of x 336 loses control and walks left 1.5 a step;
+// the dialogue that follows is not ported, so a short pause stands in for it.
+// Then three states: walk toward the player (speed +0.1 a step up to 2) for
+// 240 steps; charge up (frames 0-3 at 0.1) for 60, facing the player; charge
+// at 3.75, turning up to 2.25 degrees a step, for 120; then 30 steps' rest.
+// A melee swing whose point 16px behind the player is inside them kills it,
+// as with the bear; touching the player swaps both for the kill animation
+// halfway between them. The room has no player instance: the player starts
+// by the exit on the right. The kill animation's speed is a guess.
+export const PRISON = { introX: 336, walkLeft: 1.5, legSpeed: 0.125, talk: 90, first: 40, rest: 30, reach: 16, enter: { x: 520, y: 176 },
+  walk: { accel: 0.1, max: 2, anim: 0.1, legs: 0.15, time: 240 }, chargeUp: { to: 3, anim: 0.1, time: 60 },
+  charge: { speed: 3.75, turn: 2.25, anim: 0.075, legs: 0.15, time: 120 }, body: { speed: 2, friction: 0.1 }, killSpeed: 0.2,
+  spr: { walk: 'sprPrisonBossWalk', chargeUp: 'sprPrisonBossChargeUp', charge: 'sprPrisonBossCharge', dead: 'sprPrisonBossDead', kill: 'sprPrisonBossKill', legs: 'sprRatPrisonLegs' } };
 // Dodgers (objColombianDodger/objGangDodger/objSoldierDodger, one step code):
 // unarmed chasers on the gang AI (0xd96830). A bullet, or a weapon flying
 // faster than 4, starts sprDodger*Dodge at frame 0 and stops them; one landing
@@ -594,11 +608,17 @@ export async function play(env) {
   const isEnemy = (o) => o && o.sprite >= 0 && (inherits(G, o, 'objEnemy') || inherits(G, o, 'objVictim'));
   const enemies = room.insts.filter(i => isEnemy(G.objects.get(i.obj))).map(i => Object.assign(mkEnemy(i.obj, i.x, i.y), { inst: i }));
   const kos = [], dead = [], bullets = [];
-  const bosses = room.insts.filter(i => G.objects.get(i.obj)?.name === 'objBearBoss').map(i => {
-    for (const n of Object.values(BEAR.spr)) need(n);
-    return { inst: i, bear: true, x: i.x, y: i.y, box: maskBox(G, G.objects.get(i.obj)), state: 0, wait: BEAR.eat, hold: BEAR.hold,
-      sprite: BEAR.spr.eat, frame: 0, imageSpeed: 0.1, hs: 0, vs: 0, angle: 0 };
+  const BOSS = {
+    objBearBoss: { k: BEAR, make: () => ({ wait: BEAR.eat, hold: BEAR.hold, sprite: BEAR.spr.eat, imageSpeed: 0.1 }) },
+    objPrisonBoss: { k: PRISON, make: () => ({ intro: true, talk: PRISON.talk, wait: PRISON.first, timer: PRISON.walk.time, speed: 0, legFrame: 0,
+      sprite: PRISON.spr.walk, imageSpeed: 0, angle: 180 }) },
+  };
+  const bosses = room.insts.filter(i => BOSS[G.objects.get(i.obj)?.name]).map(i => {
+    const kind = G.objects.get(i.obj).name, d = BOSS[kind];
+    for (const n of Object.values(d.k.spr)) need(n);
+    return { inst: i, kind, x: i.x, y: i.y, box: maskBox(G, G.objects.get(i.obj)), state: 0, frame: 0, hs: 0, vs: 0, angle: 0, ...d.make() };
   });
+  const bossEnter = bosses.map(b => BOSS[b.kind].k.enter).find(Boolean);
 
   // Loose weapons: objWeapon children the player can hold.
   const wbox = maskBox(G, { mask: sprByName.get('sprWeaponMask')?.id ?? -1, sprite: -1 });
@@ -664,7 +684,7 @@ export async function play(env) {
   const lift = carry?.elevator && elevators.reduce((a, l) => !a || Math.abs(l.x - carry.elevator.x) < Math.abs(a.x - carry.elevator.x) ? l : a, null);
   if (lift) { carry.x = lift.to.x; carry.y = lift.to.y; }
   const at = carry ? nearestFree(sol, box, carry.x, carry.y)
-    : nearestFree(sol, box, spawn ? spawn.x : room.w >> 1, spawn ? spawn.y : room.h >> 1, clear);
+    : nearestFree(sol, box, spawn ? spawn.x : bossEnter ? bossEnter.x : room.w >> 1, spawn ? spawn.y : bossEnter ? bossEnter.y : room.h >> 1, clear);
   const p = { x: at.x, y: at.y, hs: 0, vs: 0, aim: 0, dir: 0, frame: 0, sprite: P.walk, attackFrame: 0, cooldown: 0, weapon: null, exec: null,
     ammo: 0, barrel: -1, dead: null };
   if (carry && arm[carry.weapon]) { p.weapon = carry.weapon; p.ammo = carry.ammo; p.sprite = arm[carry.weapon].walk; }
@@ -1228,24 +1248,67 @@ export async function play(env) {
     b.x += b.hs; b.y += b.vs;
     b.frame %= frames(b.sprite);
     if (p.dead) return;
-    const back = -p.aim / RAD + 180, at = { x: b.x + lenX(BEAR.reach, back), y: b.y + lenY(BEAR.reach, back) };
-    if (attacking() && !held()?.gun && inBox(at, p, box)) {
-      bosses.splice(bosses.indexOf(b), 1);
-      stats.kills++;
-      const dir = pointDir(p.x, p.y, b.x, b.y);
-      dead.push({ x: b.x, y: b.y, angle: b.angle, sprite: BEAR.spr.dead, frame: 0, imageSpeed: 0,
-        dir, speed: BEAR.body.speedMin + random(BEAR.body.speedRand), friction: BEAR.body.friction });
-      cam.shake = Math.max(cam.shake, KO.shake);
-    } else if (overlap(b, b.box, p, box)) {
+    if (bossHit(b, BEAR.reach)) bossDies(b, BEAR.spr.dead, BEAR.body.speedMin + random(BEAR.body.speedRand), BEAR.body.friction);
+    else if (overlap(b, b.box, p, box)) {
       killPlayer(BEAR.spr.kill, b.angle);
       Object.assign(p.dead, { frame: BEAR.killFrame, dir: b.angle, speed: BEAR.killSpeed });
+    }
+  }
+  // Both bosses die to a melee swing whose point `reach` px behind the
+  // player (toward the boss) is inside the player's mask.
+  function bossHit(b, reach) {
+    const back = -p.aim / RAD + 180, at = { x: b.x + lenX(reach, back), y: b.y + lenY(reach, back) };
+    return attacking() && !held()?.gun && inBox(at, p, box);
+  }
+  function bossDies(b, sprite, speed, friction) {
+    bosses.splice(bosses.indexOf(b), 1);
+    stats.kills++;
+    dead.push({ x: b.x, y: b.y, angle: b.angle, sprite, frame: 0, imageSpeed: 0, dir: pointDir(p.x, p.y, b.x, b.y), speed, friction });
+    cam.shake = Math.max(cam.shake, KO.shake);
+  }
+
+  function stepPrison(b) {
+    const K = PRISON;
+    if (b.intro) {
+      if (p.x > K.introX) { p.locked = true; p.x -= K.walkLeft; p.dir = Math.PI; p.aim = p.dir; p.frame += K.legSpeed; b.angle = pointDir(b.x, b.y, p.x, p.y); return; }
+      if (p.locked && --b.talk > 0) return;
+      b.intro = false; p.locked = false;
+    }
+    if (p.dead) return;
+    const toward = pointDir(b.x, b.y, p.x, p.y);
+    if (b.state === 0) {
+      if (b.wait > 0) { b.wait--; return; }
+      b.angle = toward;
+      if (b.speed < K.walk.max) b.speed += K.walk.accel;
+      b.frame += b.speed * K.walk.anim; b.legFrame += b.speed * K.walk.legs;
+      if (--b.timer <= 0) Object.assign(b, { state: 1, timer: K.chargeUp.time, frame: 0, speed: 0, sprite: K.spr.chargeUp });
+    } else if (b.state === 1) {
+      if (b.frame < K.chargeUp.to) b.frame += K.chargeUp.anim;
+      b.angle = toward;
+      if (--b.timer <= 0) Object.assign(b, { state: 2, timer: K.charge.time, frame: 0, sprite: K.spr.charge, speed: K.charge.speed });
+    } else {
+      b.angle = turnToward(b.angle, toward, K.charge.turn);
+      b.frame += b.speed * K.charge.anim; b.legFrame += b.speed * K.charge.legs;
+      if (--b.timer <= 0) Object.assign(b, { state: 0, speed: 0, wait: K.rest, timer: K.walk.time, sprite: K.spr.walk });
+    }
+    b.hs = lenX(b.speed, b.angle); b.vs = lenY(b.speed, b.angle);
+    moveAxis(sol, b.box, b, 'x', b.hs); moveAxis(sol, b.box, b, 'y', b.vs);
+    b.frame %= frames(b.sprite);
+    if (bossHit(b, K.reach)) bossDies(b, K.spr.dead, K.body.speed, K.body.friction);
+    else if (overlap(b, b.box, p, box)) {
+      bosses.splice(bosses.indexOf(b), 1);
+      const dir = pointDir(b.x, b.y, p.x, p.y);
+      p.x = (p.x + b.x) / 2; p.y = (p.y + b.y) / 2;
+      killPlayer(K.spr.kill, dir);
+      Object.assign(p.dead, { frame: 0, imageSpeed: K.killSpeed });
     }
   }
 
   function step() {
     if (!p.dead) stats.steps++;
     stepPlayer();
-    for (const b of [...bosses]) stepBear(b);
+    for (const b of [...bosses]) (b.kind === 'objPrisonBoss' ? stepPrison : stepBear)(b);
+    if (p.dead?.imageSpeed) p.dead.frame = Math.min(p.dead.frame + p.dead.imageSpeed, frames(p.dead.sprite) - 1);
     for (const d of [...dead, p.dead]) if (d?.speed > 0) {
       d.x !== undefined ? (d.x += lenX(d.speed, d.dir), d.y += lenY(d.speed, d.dir)) : (p.x += lenX(d.speed, d.dir), p.y += lenY(d.speed, d.dir));
       d.speed = Math.max(0, d.speed - (d.friction ?? BEAR.killFriction));
@@ -1320,7 +1383,10 @@ export async function play(env) {
       if (e.spr.legs) sprite(e.spr.legs, (e.hs || e.vs) ? e.legFrame : 0, e.x, e.y, -e.moveDir * RAD);
       sprite(e.sprite, e.frame, e.x, e.y, -e.angle * RAD);
     }
-    for (const b of bosses) sprite(b.sprite, b.frame, b.x, b.y, -b.angle * RAD);
+    for (const b of bosses) {
+      if (b.kind === 'objPrisonBoss') sprite(PRISON.spr.legs, b.speed ? b.legFrame : 0, b.x, b.y, -b.angle * RAD);
+      sprite(b.sprite, b.frame, b.x, b.y, -b.angle * RAD);
+    }
     for (const x of exits) if (x.live) sprite(x.sprite, x.frame, x.x, x.y, 0);
     for (const b of bullets) sprite(bulletSprite, 0, b.x, b.y, -b.dir * RAD);
     if (held()?.gun) {
@@ -1367,7 +1433,7 @@ export async function play(env) {
 
   // Handle for tests and for stopping.
   const handle = {
-    room: room.name, stats, player: p, keys, pressed, mouse, solids: sol, box, enemies, bosses, kos, dead, doors, weapons, bullets, exits, elevators, step, draw, leave,
+    room: room.name, stats, cam, player: p, keys, pressed, mouse, solids: sol, box, enemies, bosses, kos, dead, doors, weapons, bullets, exits, elevators, step, draw, leave,
     stop() {
       running = false;
       removeEventListener('keydown', onKey);
