@@ -91,6 +91,14 @@ export const FANS = {
   'objSon:0': { roll: { sprite: 'sprSonRoll', cooldown: 30, invulnerable: 19, speed: 4, imageSpeed: 0.5 } },
   'objSon:1': { lethal: true, noPickup: true },
   'objSon:2': { doubleFire: true },
+  // Evan (objWriter): scrPickup checks his var 0x80 (raised only by the lethal
+  // sprWriter2 kills) and below 2 plays sprWriterDisarm<gun> at image speed 0.5
+  // instead of arming. Ported as never arming a gun: the gun is gone after the
+  // animation (a guess; the game drops parts). His executions use the
+  // non-lethal sprWriterKillPunch / Kill<weapon>2 and leave the body
+  // unconscious for good; it counts as cleared (guess). The lethal "lost it"
+  // mode is not ported.
+  objWriter: { nonLethal: true, disarm: true, stomp: 'KillPunch' },
   objPlayerBear: { stomp: 'Stomp', special: { walk: 'sprBearWalkSpecial', arm: 'sprBearArm', shoulder: 9, flash: 3, label: 'MP5 x2',
     gun: { ammo: 64, imageSpeed: 0, cooldown: 4, shake: 3, pellets: 1, spread: 6, speed: 12, speedRand: 4, muzzle: 33, sound: 'sndMP5' } } },
 };
@@ -573,14 +581,14 @@ export async function play(env) {
     walk: need(walkName),
     legs: need(pre + 'Legs'),
     punches: (fan?.punch || ['AttackPunch']).map(n => need(pre + n)).filter(Boolean),
-    stomp: need(pre + 'KillStomp') || (fan && need(pre + fan.stomp)),
+    stomp: (fan?.nonLethal && need(pre + fan.stomp)) || need(pre + 'KillStomp') || (fan && need(pre + fan.stomp)),
   };
   P.punch = P.punches[0];
   // Per weapon: walk, attack and execution sprites, if the character has them.
   const arm = {};
   for (const [name, a] of Object.entries(ARMS)) {
     const walk = need(pre + 'Walk' + name), attack = need(pre + 'Attack' + name);
-    if (walk && attack) arm[name] = { ...a, walk, attack, kill: need(pre + 'Kill' + name) || P.stomp };
+    if (walk && attack) arm[name] = { ...a, walk, attack, kill: (fan?.nonLethal ? need(pre + 'Kill' + name + '2') : need(pre + 'Kill' + name)) || P.stomp };
   }
   for (const [name, g] of Object.entries(GUNS)) {
     const walk = need(pre + 'Walk' + name);
@@ -593,6 +601,7 @@ export async function play(env) {
     P.arm = need(s.arm);
   }
   if (fan?.roll) P.roll = need(fan.roll.sprite);
+  if (fan?.disarm) P.disarm = Object.fromEntries(Object.keys(GUNS).map(g => [g, need(pre + 'Disarm' + g)]));
   P.deadShot = need(pre + 'DeadShot') || need(pre + 'DeadShotgun') || need(pre + 'DeadMachinegun');
   P.deadBlunt = need(pre + 'DeadBlunt') || P.deadShot;
   const bulletSprite = need('sprBullet'), clearedArt = art.get(need(CLEARED.sprite)), leaveSprite = Object.fromEntries(Object.entries(IDLE.leave).map(([k, v]) => [k, need(v.sprite)]));
@@ -1003,6 +1012,12 @@ export async function play(env) {
       if (p.weapon) throwWeapon();
       weapons.splice(weapons.indexOf(w), 1);
       sfx(SOUND.pickup);
+      const disarm = P.disarm?.[w.name];
+      if (disarm) {
+        p.sprite = disarm; p.attackFrame = 0;
+        p.attack = { frames: frames(disarm), gun: true, imageSpeed: 0.5 };
+        return;
+      }
       p.weapon = w.name;
       p.ammo = w.ammo ?? 0;
     } else if (p.weapon) throwWeapon();
@@ -1019,6 +1034,15 @@ export async function play(env) {
     const animation = (held() ? held().kill : P.stomp), kill = animation || P.punch || P.walk;
     const duration = animation ? frames(animation) : 6;
     kos.splice(kos.indexOf(k), 1);
+    if (fan?.nonLethal) {
+      // The body stays down where it lay, in its knocked-out pose.
+      if (k.isEnemy) award(POINTS.exec, k.x, k.y);
+      const d = { x: k.x, y: k.y, angle: k.angle + (k.fallbackPose ? 90 : 0), sprite: k.sprite, frame: k.frame, imageSpeed: 0 };
+      dead.push(d);
+      p.exec = { x: k.x, y: k.y, angle: k.angle + 180, sprite: kill, frame: 0, duration, body: { ...d } };
+      p.x = k.x; p.y = k.y; p.hs = p.vs = 0;
+      return true;
+    }
     if (k.isEnemy) { stats.kills++; award(POINTS.exec, k.x, k.y); }
     const d = { x: k.x, y: k.y, angle: k.angle, sprite: body, frame: 0, imageSpeed: EXEC.imageSpeed * frames(body) / duration };
     dead.push(d);

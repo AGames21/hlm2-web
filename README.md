@@ -344,6 +344,11 @@ mask `sprMask` (24×24, origin 12,12, fully solid).
   kills with fists and takes no weapons; the Son's first style rolls (Corey's numbers), the second
   kills with punches and takes no weapons, and the third fires twice. A room with no player
   instance (the Son's) starts the player at the menu.
+- **Evan** (objWriter, `d8t.c` scrPickup 0x1157500): picking up a gun plays sprWriterDisarm<gun>
+  at image speed 0.5 instead of arming while his var 0x80 is below 2 (only the lethal sprWriter2
+  kills raise it). The port never arms him with a gun and the gun is gone afterwards (a guess).
+  His executions use sprWriterKillPunch / Kill<weapon>2 and the body stays unconscious for good,
+  without a kill (a guess). The lethal "lost it" mode is not ported.
 
 ## Not decoded yet
 
