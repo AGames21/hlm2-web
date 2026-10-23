@@ -13,6 +13,7 @@ import { options, gameKey } from './settings.js';
 import { TALKS, TALKERS } from './conversations.js';
 import { conversation, TALK } from './dialogue.js';
 import { DATES } from './dates.js';
+import { SON_BOSS_WHO, sonBossDefinitions, stepSonBoss, hitSonBoss } from './bosses.js';
 
 // Date card layout is a guess; the fade step is from objDate draw 0x6ca7d0.
 export const DATE_CARD = { hold: 180, fade: 0.01, margin: 8, line: 16, font: 'bold 13px monospace' };
@@ -306,7 +307,7 @@ export const BEAR = { introX: 224, stopY: 248, walkUp: 2, legSpeed: 0.3, eat: 12
 // as with the bear; touching the player swaps both for the kill animation
 // halfway between them. The room has no player instance: the player starts
 // by the exit on the right. The kill animation's speed is a guess.
-const BOSS_WHO = { objBearBoss: 'objSon', objPrisonBoss: 'objRatPrison' };
+const BOSS_WHO = { ...SON_BOSS_WHO, objBearBoss: 'objSon', objPrisonBoss: 'objRatPrison' };
 export const PRISON = { introX: 336, walkLeft: 1.5, legSpeed: 0.125, talk: 90, first: 40, rest: 30, reach: 16, enter: { x: 520, y: 176 },
   walk: { accel: 0.1, max: 2, anim: 0.1, legs: 0.15, time: 240 }, chargeUp: { to: 3, anim: 0.1, time: 60 },
   charge: { speed: 3.75, turn: 2.25, anim: 0.075, legs: 0.15, time: 120 }, body: { speed: 2, friction: 0.1 }, killSpeed: 0.2,
@@ -564,9 +565,11 @@ export async function play(env) {
   const byName = n => n && G.objects.list.find(o => o.name === n);
   const bossWho = room.insts.map(i => BOSS_WHO[G.objects.get(i.obj)?.name]).find(Boolean);
   // env.character is a player object name, or '<object>:<pick>' from the Jake
-  // and Son menus (the same object, played differently).
+  // and Son menus (the same object, played differently). The Son's story
+  // scenes (bosses.js) always play as the Son.
   const pick = env.character || '', pickObj = pick.split(':')[0];
-  const pobj = spawn ? G.objects.get(spawn.obj) : byName(pickObj) || byName(bossWho) || byName('objPigButcher');
+  const sonWho = room.name === 'rmLSDIntro' ? 'objSon' : room.insts.map(i => SON_BOSS_WHO[G.objects.get(i.obj)?.name]).find(Boolean);
+  const pobj = byName(sonWho) || (spawn ? G.objects.get(spawn.obj) : byName(pickObj) || byName(bossWho) || byName('objPigButcher'));
   const fan = FANS[pick.startsWith(pobj.name + ':') ? pick : pobj.name];
   const sprByName = new Map(G.sprites.list.map(s => [s.name, s]));
   const art = new Map();
@@ -686,10 +689,11 @@ export async function play(env) {
     e.sprite = walking && e.spr.walk ? e.spr.walk : e.spr.idle;
     return e;
   };
-  const isEnemy = (o) => o && o.sprite >= 0 && (inherits(G, o, 'objEnemy') || inherits(G, o, 'objVictim'));
+  const isEnemy = (o) => o && !BOSS_WHO[o.name] && o.sprite >= 0 && (inherits(G, o, 'objEnemy') || inherits(G, o, 'objVictim'));
   const enemies = room.insts.filter(i => isEnemy(G.objects.get(i.obj))).map(i => Object.assign(mkEnemy(i.obj, i.x, i.y), { inst: i }));
   const kos = [], dead = [], bullets = [];
   const BOSS = {
+    ...sonBossDefinitions(room, G),
     objBearBoss: { k: BEAR, make: () => ({ wait: BEAR.eat, hold: BEAR.hold, sprite: BEAR.spr.eat, imageSpeed: 0.1 }) },
     objPrisonBoss: { k: PRISON, make: () => ({ intro: true, talk: PRISON.talk, wait: PRISON.first, timer: PRISON.walk.time, speed: 0, legFrame: 0,
       sprite: PRISON.spr.walk, imageSpeed: 0, angle: 180 }) },
@@ -697,7 +701,7 @@ export async function play(env) {
   const bosses = room.insts.filter(i => BOSS[G.objects.get(i.obj)?.name]).map(i => {
     const kind = G.objects.get(i.obj).name, d = BOSS[kind];
     for (const n of Object.values(d.k.spr)) need(n);
-    return { inst: i, kind, x: i.x, y: i.y, box: maskBox(G, G.objects.get(i.obj)), state: 0, frame: 0, hs: 0, vs: 0, angle: 0, ...d.make() };
+    return { inst: i, kind, x: i.x, y: i.y, box: G.objects.get(i.obj).sprite >= 0 ? maskBox(G, G.objects.get(i.obj)) : ZERO, state: 0, frame: 0, hs: 0, vs: 0, angle: 0, ...d.make() };
   });
   const bossEnter = bosses.map(b => BOSS[b.kind].k.enter).find(Boolean);
 
@@ -745,7 +749,8 @@ export async function play(env) {
   // else when the player walks up to any talker.
   const talkers = room.insts.filter(i => TALKERS.has(G.objects.get(i.obj)?.name));
   const script = !talkers.length || talkers.some(t => G.objects.get(t.obj).sprite < 0);
-  const talks = (TALKS[room.id] || []).map((pages, k) => {
+  const sonScene = bosses.some(b => b.kind === 'objBoss' || b.kind === 'objColombianBoss');
+  const talks = (sonScene ? [] : TALKS[room.id] || []).map((pages, k) => {
     for (const [face] of pages) if (face) need(face);
     const near = talkers.filter(t => G.objects.get(t.obj).sprite >= 0);
     return { pages, at: script && k === 0 || !near.length ? null : near };
@@ -784,12 +789,13 @@ export async function play(env) {
     env.cutscene = conversation(G, t.pages, { drawFace });
   }
 
+  if (sonScene) for (const [face] of (TALKS[room.id] || []).flat()) if (face) need(face);
   await Promise.all([...art.values()].map(a => env.load(a.hit.atlas)));
   if (env.cancelled?.()) return null;
 
   // Pre-render the room into the layers under and over the player, leaving
   // out everything that moves.
-  const dynamic = new Set([spawn, ...enemies.map(e => e.inst), ...doors.map(d => d.inst), ...weapons.map(w => w.inst), ...exits.map(x => x.inst), ...elevators.map(l => l.inst), ...bosses.map(b => b.inst)]);
+  const dynamic = new Set([spawn, ...enemies.map(e => e.inst), ...doors.map(d => d.inst), ...weapons.map(w => w.inst), ...exits.map(x => x.inst), ...elevators.map(l => l.inst), ...bosses.flatMap(b => [b.inst, b.actor].filter(Boolean))]);
   const layer = (keep) => {
     const c = new OffscreenCanvas(room.w, room.h), cx = c.getContext('2d');
     drawRoomItems(cx, items, imgs, keep, dynamic);
@@ -990,6 +996,8 @@ export async function play(env) {
       if (b.x < -BULLET.margin || b.y < -BULLET.margin || b.x > room.w + BULLET.margin || b.y > room.h + BULLET.margin) return false;
       if (b.x >= 0 && b.y >= 0 && b.x < room.w && b.y < room.h && solidAt(b.x, b.y)) return false;
       if (b.byPlayer) {
+        const boss = bosses.find(q => q.kind === 'objColombianBoss' && overlap(b, ZERO, q, q.box));
+        if (boss && hitSonBoss(boss, sonContext)) return false;
         const e = enemies.find(e => overlap(b, ZERO, e, e.box));
         if (e) { bulletHit(e, b.dir, b.shotgun); return false; }
       } else if (!p.dead && !p.exec && !(p.roll && p.roll.frame < fan.roll.invulnerable) && overlap(b, ZERO, p, box)) { killPlayer(P.deadShot, b.dir); return false; }
@@ -1474,6 +1482,22 @@ export async function play(env) {
     cam.shake = Math.max(cam.shake, BURST.shake);
   }
 
+  const sonContext = {
+    player: p, frames,
+    place(x, y) { Object.assign(p, nearestFree(sol, box, x, y)); },
+    melee: b => bossHit(b, 12), // GUESS: melee fallback reach.
+    pages: (TALKS[room.id] || []).flat(),
+    say(pages, done) {
+      env.cutscene = conversation(G, pages, { drawFace, onEnd: done });
+      if (!env.cutscene) done();
+    },
+    remove(b) { const i = bosses.indexOf(b); if (i >= 0) bosses.splice(i, 1); },
+    die(b, sprite, speed, friction) {
+      // GUESS: corpse is held in place; the original animates/flips the chair.
+      bossDies(b, sprite, 0, friction);
+    },
+  };
+
   function stepBear(b) {
     b.frame += b.imageSpeed;
     if (b.state === 0) {
@@ -1567,7 +1591,10 @@ export async function play(env) {
     if (env.cutscene?.step({ pressed, mouse, player: p })) { pressed.clear(); mouse.click = mouse.right = false; moveCamera(CAMERA.ease); return; }
     if (!p.dead) stats.steps++;
     stepPlayer();
-    for (const b of [...bosses]) (b.kind === 'objPrisonBoss' ? stepPrison : stepBear)(b);
+    for (const b of [...bosses]) {
+      if (b.kind === 'objColombianBoss' || b.kind === 'objBoss') stepSonBoss(b, sonContext);
+      else (b.kind === 'objPrisonBoss' ? stepPrison : stepBear)(b);
+    }
     if (p.dead?.imageSpeed) p.dead.frame = Math.min(p.dead.frame + p.dead.imageSpeed, frames(p.dead.sprite) - 1);
     for (const d of [...dead, p.dead]) if (d?.speed > 0) {
       d.x !== undefined ? (d.x += lenX(d.speed, d.dir), d.y += lenY(d.speed, d.dir)) : (p.x += lenX(d.speed, d.dir), p.y += lenY(d.speed, d.dir));
@@ -1679,7 +1706,7 @@ export async function play(env) {
     if (p.exec) { sprite(p.exec.sprite, p.exec.frame, p.x, p.y, -p.exec.angle * RAD); cx.drawImage(over, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H); cx.restore(); hud(); return; }
     const moving = p.hs || p.vs;
     if (p.roll) sprite(P.roll, p.roll.frame, p.x, p.y, p.roll.dir);
-    else {
+    else if (!p.sceneHidden) {
       sprite(P.legs, moving ? p.frame : 0, p.x, p.y, p.dir);
       if (held()?.special) for (const s of bearArms()) sprite(P.arm, p.flash && s.side === p.barrel ? 1 : 0, s.x, s.y, -s.deg * RAD);
       sprite(p.sprite, attacking() ? p.attackFrame : moving ? p.frame : 0, p.x, p.y, p.aim);
