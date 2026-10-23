@@ -40,7 +40,6 @@
   dialog label, .binding-row { display: flex; justify-content: space-between; gap: 16px; margin: 12px 0; }
   dialog p { color: var(--dim); }
   #settings-message { min-height: 1.5em; color: #ffe02a; }
-  #music-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 16px; background: var(--panel); }
   #music-track { max-width: 220px; }
   #music-status { color: var(--dim); }
   #youtube-controls { padding: 8px 16px; background: var(--panel); }
@@ -52,23 +51,39 @@
   #intro { max-width: 560px; margin: 40px auto; padding: 0 16px; color: var(--dim); }
   #intro b { color: var(--fg); }
   code { color: var(--fg); }
+  .file.primary { padding: 7px 14px; font-weight: bold; }
+  button.quiet { background: transparent; border: 1px solid #4a2a52; color: var(--dim); }
+  button.quiet[aria-pressed=true] { background: #4a2a52; color: var(--fg); }
+  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 16px; background: var(--panel); border-bottom: 1px solid #4a2a52; }
+  #intro h2 { color: var(--hot); letter-spacing: .05em; }
+  #intro h3 { color: var(--fg); margin-bottom: 6px; }
+  #intro li { margin: 6px 0; }
+  #intro table { border-collapse: collapse; }
+  #intro td { padding: 3px 14px 3px 0; }
+  #intro td:first-child { color: var(--fg); }
+  #drop { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: #120914e6; border: 4px dashed var(--hot); color: var(--fg); font-size: 24px; pointer-events: none; }
+  #view.fit:not(.expanded) canvas { width: var(--fit-width) !important; height: var(--fit-height) !important; margin: 16px auto; }
 </style>
 </head>
 <body>
 <header>
   <h1>HLM2 WEB</h1>
-  <label class="file">Load .wad<input id="pick" type="file" accept=".wad" multiple></label>
-  <input id="filter" type="search" placeholder="filter rooms" size="12">
-  <select id="room" aria-label="Room" disabled></select>
-  <button id="menu" disabled>Menu</button>
-  <button id="play" disabled>Play</button>
+  <label class="file primary">Load game files<input id="pick" type="file" accept=".wad" multiple></label>
+  <button id="menu" disabled>Main menu</button>
   <button id="fullscreen" aria-pressed="false">Fullscreen</button>
   <button id="settings">Settings</button>
-  <label>Zoom <select id="zoom"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
-  <label><input id="hidden" type="checkbox"> hidden objects</label>
+  <button id="toggle-music" class="quiet" aria-pressed="false" aria-controls="music-controls youtube-controls">Music</button>
+  <button id="toggle-tools" class="quiet" aria-pressed="false" aria-controls="tools">Level tools</button>
   <span id="status">No game data loaded.</span>
 </header>
-<div id="music-controls" role="group" aria-label="Music player">
+<div id="tools" class="bar" role="group" aria-label="Level tools" hidden>
+  <input id="filter" type="search" placeholder="filter rooms" size="12">
+  <select id="room" aria-label="Room" disabled></select>
+  <button id="play" disabled>Play this room</button>
+  <label>Size <select id="zoom"><option value="0">Fit</option><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
+  <label><input id="hidden" type="checkbox"> hidden objects</label>
+</div>
+<div id="music-controls" class="bar" role="group" aria-label="Music player" hidden>
   <label>Track <select id="music-track"><option value="@original">Neon Afterhours — original synth</option></select></label>
   <button id="music-play" aria-pressed="false">Play music</button>
   <label>Volume <input id="music-volume" type="range" min="0" max="100" value="70"></label>
@@ -76,7 +91,7 @@
 </div>
 
 <div id="view">
-<section id="youtube-controls" aria-label="YouTube soundtrack">
+<section id="youtube-controls" aria-label="YouTube soundtrack" hidden>
   <div id="youtube-tools">
     <button id="youtube-mix" type="button">Play game soundtrack</button>
     <label><input id="youtube-follow" type="checkbox"> Follow scene music</label>
@@ -111,9 +126,9 @@
     </fieldset>
     <fieldset data-panel="video" hidden><legend>Video</legend>
       <button id="settings-fullscreen" type="button">Enter fullscreen</button>
-      <label>Window scale <select id="setting-zoom"><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
+      <label>Window scale <select id="setting-zoom"><option value="0">Fit to window</option><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
       <label>Screen shake <input id="setting-shake" type="checkbox"></label>
-      <p>Fullscreen fits the game to your screen. Black bars preserve its proportions.</p>
+      <p>Fit to window sizes the game to the page; Fullscreen fills the screen. Black bars keep its proportions.</p>
     </fieldset>
     <fieldset data-panel="controls" hidden><legend>Keyboard and mouse</legend>
       <div id="key-bindings"></div>
@@ -125,14 +140,29 @@
     <button id="settings-report" type="button">Save bug report</button>
   </dialog>
   <div id="intro">
-    <p>This page holds no game files. Pick <b>hlm2_data_desktop.wad</b> from your own
-    Hotline Miami 2 install (<code>steamapps/common/Hotline Miami 2</code>). It is read in
-    this browser and kept in local storage, so you only pick it once per device.</p>
-    <p>Use the <b>YouTube soundtrack</b> player above to listen without game files.
-    Or try <b>Play music</b> for an original synth loop.
-    You can also load <b>hlm2_music_desktop.wad</b> on its own and choose a track above.
-    Loading the data WAD later enables the game; music is optional.</p>
+    <h2>Play Hotline Miami 2 in your browser</h2>
+    <ol>
+      <li>Find <b>hlm2_data_desktop.wad</b> in your own Hotline Miami 2 install
+        (Steam: right-click the game → Manage → Browse local files).</li>
+      <li>Click <b>Load game files</b> above and pick it, or drag it onto this page.
+        Add <b>hlm2_music_desktop.wad</b> too if you want the game's music.</li>
+      <li>The title menu starts. Pick <b>NEW GAME</b>.</li>
+    </ol>
+    <p>Your files stay in this browser and are kept for next time, so you only do this once per device.
+    Nothing is uploaded.</p>
+    <h3>Controls</h3>
+    <table>
+      <tr><td>Move</td><td>WASD or arrow keys</td></tr>
+      <tr><td>Aim</td><td>Mouse</td></tr>
+      <tr><td>Attack / shoot</td><td>Left click</td></tr>
+      <tr><td>Pick up / throw</td><td>Right click</td></tr>
+      <tr><td>Execute, talk, special</td><td>Space</td></tr>
+      <tr><td>Restart floor</td><td>R</td></tr>
+      <tr><td>Skip intro / leave</td><td>Enter / Esc</td></tr>
+    </table>
+    <p>Change keys in <b>Settings</b>. No music file? Open <b>Music</b> and use the YouTube soundtrack.</p>
   </div>
+  <div id="drop" hidden>Drop your .wad files to load them</div>
   <canvas id="canvas" tabindex="0" aria-label="Game view" hidden></canvas>
 </div>
 <script type="module" src="app.js"></script>

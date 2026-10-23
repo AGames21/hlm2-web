@@ -10,10 +10,12 @@ import { frontEnd, card, maskMenu, abortMenu, STORY, progress, options } from '.
 import { YouTubePlayer, youtubeTrack } from './youtube.js';
 import { SOUNDTRACK, SOUNDTRACK_MIX, SceneSoundtrack, trackLabel, trackSearch } from './soundtrack.js';
 import { drawRoomItems } from './render.js';
-import { setupFullscreen } from './fullscreen.js';
+import { setupFullscreen, fittedSize } from './fullscreen.js';
 import { setupSettings } from './settings.js';
 
 const $ = id => document.getElementById(id);
+// Zoom 0 means fit to the window: draw at 1x and let CSS scale the canvas.
+const zoomNow = () => options.zoom || 1;
 const DATA_WAD = 'hlm2_data_desktop.wad';
 const MUSIC_WAD = 'hlm2_music_desktop.wad';
 // Objects the game draws with blend modes or only as controllers (lighting
@@ -168,7 +170,7 @@ async function drawRoom(room, request = menuToken) {
   const { items, imgs, missing, lvl } = await roomItems(room, $('hidden').checked);
   if (request !== menuToken) return;
 
-  const zoom = +$('zoom').value;
+  const zoom = zoomNow();
   const cv = $('canvas');
   cv.width = room.w;
   cv.height = room.h;
@@ -209,7 +211,7 @@ async function startPlay(name = $('room').value, carry = null, track, character 
   const { items, imgs, levelAtlas } = await roomItems(room, false);
   if (request !== menuToken) return false;
   if (!character && room.insts.some(i => G.objects.get(i.obj)?.name === 'objMaskMenu')) {
-    character = await maskMenu(G, $('canvas'), +$('zoom').value);
+    character = await maskMenu(G, $('canvas'), zoomNow());
     if (request !== menuToken || typeof character !== 'string') {
       if (character === null) status('No mask picked.');
       return false;
@@ -218,7 +220,7 @@ async function startPlay(name = $('room').value, carry = null, track, character 
   const frames = name => findFrames(name, levelAtlas);
   // The player's sprites often live in shared atlases the room doesn't use.
   const load = async atlas => { if (!imgs.has(atlas)) imgs.set(atlas, await image(atlas)); };
-  const env = { G, room, items, imgs, frames, load, canvas: $('canvas'), zoom: +$('zoom').value, carry, character,
+  const env = { G, room, items, imgs, frames, load, canvas: $('canvas'), zoom: zoomNow(), carry, character,
     status: message => { if (request === menuToken) status(message); },
     cancelled: () => request !== menuToken,
     paused: () => $('settings-dialog').open,
@@ -298,7 +300,7 @@ async function showMenu() {
   history.replaceState(null, '', '#menu');
   status('Arrows and Enter, or the mouse. Esc goes back.');
   let r;
-  try { r = await frontEnd(G, $('canvas'), +$('zoom').value, openSettings); }
+  try { r = await frontEnd(G, $('canvas'), zoomNow(), openSettings); }
   catch (error) { status('Menu failed to load: ' + error.message); console.error(error); return; }
   if (token !== menuToken) return;
   if (r.action === 'viewer') {
@@ -315,7 +317,7 @@ async function runScene(i) {
   const token = menuToken;
   story = { i, intro: false };
   progress.reach(i);
-  const zoom = +$('zoom').value, cv = $('canvas');
+  const zoom = zoomNow(), cv = $('canvas');
   status(`${s.scene}: ${s.title}`);
   if (s.act) await card(G, cv, zoom, s, 'act');
   if (token !== menuToken) return;
@@ -429,8 +431,7 @@ async function setMusic(blob) {
   if (requested) await a.playMusic(requested);
 }
 
-$('pick').onchange = async e => {
-  const files = [...e.target.files];
+async function loadFiles(files) {
   const data = files.find(f => f.name.toLowerCase() === DATA_WAD), music = files.find(f => f.name.toLowerCase() === MUSIC_WAD);
   try {
     if (!data && !music) throw new Error(`Choose ${DATA_WAD} or ${MUSIC_WAD}`);
@@ -444,10 +445,24 @@ $('pick').onchange = async e => {
   } catch (err) {
     status('Could not read that file: ' + err.message);
     console.error(err);
-  } finally {
-    e.target.value = '';
   }
+}
+$('pick').onchange = async e => {
+  await loadFiles([...e.target.files]);
+  e.target.value = '';
 };
+// Drag the wads anywhere onto the page.
+let drags = 0;
+const dragsFiles = e => e.dataTransfer?.types.includes('Files');
+addEventListener('dragenter', e => { if (dragsFiles(e)) { drags++; $('drop').hidden = false; } });
+addEventListener('dragleave', e => { if (dragsFiles(e) && --drags <= 0) { drags = 0; $('drop').hidden = true; } });
+addEventListener('dragover', e => { if (dragsFiles(e)) e.preventDefault(); });
+addEventListener('drop', e => {
+  if (!dragsFiles(e)) return;
+  e.preventDefault();
+  drags = 0; $('drop').hidden = true;
+  loadFiles([...e.dataTransfer.files]);
+});
 $('music-play').onclick = async () => {
   const button = $('music-play');
   button.disabled = true;
@@ -528,9 +543,37 @@ const applySettings = () => {
   youtube.setVolume(options.musicVolume, options.music);
   $('zoom').value = options.zoom;
   const cv = $('canvas');
-  cv.style.width = cv.width * options.zoom + 'px';
-  cv.style.height = cv.height * options.zoom + 'px';
+  cv.style.width = cv.width * zoomNow() + 'px';
+  cv.style.height = cv.height * zoomNow() + 'px';
+  fit();
 };
+// Fit mode scales the canvas to the free space under the header.
+function fit() {
+  const view = $('view'), cv = $('canvas');
+  view.classList.toggle('fit', options.zoom === 0);
+  if (options.zoom !== 0) return;
+  const yt = $('youtube-controls');
+  const size = fittedSize(cv.width, cv.height, view.clientWidth - 32, view.clientHeight - 32 - (yt.hidden ? 0 : yt.offsetHeight));
+  cv.style.setProperty('--fit-width', size.width + 'px');
+  cv.style.setProperty('--fit-height', size.height + 'px');
+}
+new ResizeObserver(fit).observe($('view'));
+new MutationObserver(fit).observe($('canvas'), { attributes: true, attributeFilter: ['width', 'height', 'hidden'] });
+// Rarely used panels stay folded away; the choice is remembered.
+function panelToggle(button, panels, key) {
+  const set = open => {
+    for (const p of panels) $(p).hidden = !open;
+    $(button).setAttribute('aria-pressed', String(open));
+    try { localStorage.setItem(key, open ? '1' : ''); } catch {}
+    fit();
+  };
+  let open = false;
+  try { open = localStorage.getItem(key) === '1'; } catch {}
+  set(open);
+  $(button).onclick = () => set($(button).getAttribute('aria-pressed') !== 'true');
+}
+panelToggle('toggle-music', ['music-controls', 'youtube-controls'], 'hlm2-panel-music');
+panelToggle('toggle-tools', ['tools'], 'hlm2-panel-tools');
 const focusGame = () => { if (!$('canvas').hidden) $('canvas').focus({ preventScroll: true }); };
 const openSettings = setupSettings($('settings-dialog'), applySettings, () => $('fullscreen').click(), focusGame);
 $('settings-report').onclick = () => {
@@ -555,7 +598,7 @@ addEventListener('keydown', e => {
 $('menu').onclick = () => G && showMenu();
 $('filter').oninput = () => G && fillRooms();
 $('room').onchange = showSelected;
-$('zoom').onchange = e => { options.zoom = +e.target.value; options.save(); };
+$('zoom').onchange = e => { options.zoom = +e.target.value; options.save(); applySettings(); };
 $('hidden').onchange = showSelected;
 
 // Startup: a wad saved earlier in this browser, else one served next to the

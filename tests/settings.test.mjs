@@ -11,10 +11,10 @@ test('Older music and censor settings migrate without losing their choices', () 
 });
 
 test('Invalid saved values cannot break volume, scaling, or keyboard controls', () => {
-  const settings = normalizeSettings({ musicVolume: -20, effectsVolume: 200, zoom: 0, shake: 'off', bindings: { up: 'Escape' } });
+  const settings = normalizeSettings({ musicVolume: -20, effectsVolume: 200, zoom: 9, shake: 'off', bindings: { up: 'Escape' } });
   assert.equal(settings.musicVolume, 0);
   assert.equal(settings.effectsVolume, 100);
-  assert.equal(settings.zoom, 2);
+  assert.equal(settings.zoom, 0);
   assert.equal(settings.shake, true);
   assert.deepEqual(settings.bindings, defaultBindings);
   assert.deepEqual(normalizeSettings(null), normalizeSettings());

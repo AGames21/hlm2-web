@@ -1,5 +1,5 @@
 export const defaultBindings = { up: 'w', down: 's', left: 'a', right: 'd', execute: ' ', restart: 'r' };
-export const defaultSettings = { music: true, musicVolume: 70, effectsVolume: 100, shake: true, zoom: 2, censor: false };
+export const defaultSettings = { music: true, musicVolume: 70, effectsVolume: 100, shake: true, zoom: 0, censor: false };
 const storageKey = 'hlm2-web-options';
 
 export function normalizeSettings(value = {}) {
@@ -7,7 +7,8 @@ export function normalizeSettings(value = {}) {
   const out = { ...defaultSettings, bindings: { ...defaultBindings } };
   for (const name of ['music', 'shake', 'censor']) if (typeof input[name] === 'boolean') out[name] = input[name];
   for (const name of ['musicVolume', 'effectsVolume']) if (Number.isFinite(input[name])) out[name] = Math.max(0, Math.min(100, input[name]));
-  if ([1, 2, 3, 4].includes(input.zoom)) out.zoom = input.zoom;
+  // 0 fits the game to the window.
+  if ([0, 1, 2, 3, 4].includes(input.zoom)) out.zoom = input.zoom;
   if (input.bindings && Object.keys(defaultBindings).every(name => validKey(input.bindings[name])) && new Set(Object.values(input.bindings)).size === 6) {
     for (const name of Object.keys(defaultBindings)) out.bindings[name] = input.bindings[name];
   }

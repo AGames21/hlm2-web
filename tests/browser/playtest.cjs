@@ -78,6 +78,10 @@ async function punchAndFinish(page) {
     await page.route('https://www.youtube.com/iframe_api', route => route.fulfill({ status: 200, contentType: 'application/javascript', body: require('./youtube-api.cjs') }));
     await page.route('https://www.youtube-nocookie.com/**', route => route.fulfill({ status: 200, contentType: 'text/html', body: '<p>Test embed</p>' }));
     await page.goto(base);
+    // Music and level tools start folded away; open them for the checks below.
+    assert(await page.locator('#tools').isHidden() && await page.locator('#music-controls').isHidden());
+    await page.locator('#toggle-music').click(); await page.locator('#toggle-tools').click();
+    assert(await page.locator('#music-play').isVisible() && await page.locator('#room').isVisible());
     await check('Code-only startup, generated music, volume and stop', async () => {
       assert(await page.locator('#play').isDisabled());
       await page.locator('#music-play').click();
