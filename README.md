@@ -115,6 +115,16 @@ spread direction, and the chainsaw/fist lethality model. Ash's gun follower is n
 
 Test room: rmFansLevel1Floor1 (enemies sit close to the spawn).
 
+Step 12: talk, blood, camera, date cards. `web/dialogue.js` runs conversations (objConversation:
+letterbox bars, typed text, portraits); `web/conversations.js` holds only string ids and portrait
+names per room, and the text is read at runtime from the player's own `hlm2_localization.bin`.
+Kills stamp blood splats and pools (objSplat: random angle, scale 0.8 + random 0.4) onto a floor
+layer that stays for the floor. The camera eases toward the player and leads toward the mouse.
+`web/dates.js` holds the per-room date card data from the objDate room start script (place string
+id, year, month, day, hour, minute); the card is drawn bottom-left and fades by 0.01 a frame.
+Guesses: splat count/spread/speed, camera lead and ease, the card's layout and hold time.
+Test hook: `window.runScene(i)` starts story scene i.
+
 ## Run
 
 For code-only development, run `node server.js` (no dependency install or build).
