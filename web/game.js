@@ -393,6 +393,38 @@ export const DOG = { recheck: 10, speed: 4, kill: 22, imageSpeed: 0.1, runImage:
 // one frame per direction (from vars 32/36). Here the direction is taken from
 // the nearest room edge, which is a guess.
 export const EXIT = { objects: ['objNextroom'] };
+// objStartPoint (709, no sprite; create 0xbd7800, alarm 0xbd7770, draw
+// 0xbd78f0) marks the jungle and power plant screens, which have no player
+// instance. Its draw shows a blinking sprArrow turned by the room edge once no
+// enemy is left. Here the start point nearest a placed player (objNicke in
+// the first room), else the lowest-id one not on an objNextroom, is where the
+// player enters, and in rooms with no other exit the rest are exits
+// (a box of half-size `reach` around the point). How the game picks the entry
+// and leaves the screen (walking off the edge) is not read; this is a guess
+// that fits every jungle room's layout.
+export const START_POINT = { object: 'objStartPoint', reach: 24 };
+// Rooms with no objNextroom, elevator or second start point end some other
+// way: the sewer grate is kicked open (objSewerGrateKick 0xba0fe0 /
+// objSewerEntrance), the power plant cave mouth (objCaveOpening step 0x619540)
+// and the vault door (objVaultOpening 0xba4f00) are walked into, and the rest
+// (objHBorder 0x8410b0 calling room_goto_next, objDeathWishRoof, objLSD) move on
+// by themselves once the floor is clear. Their decompiled events are not fully
+// read: here the objects below are walk-on exits once the floor is clear (a box
+// of half-size `reach`), a room with one start point leaves from it, and any
+// other such room moves on `wait` steps after it is clear.
+export const ROOM_END = { objects: ['objSewerGrateKick', 'objCaveOpening', 'objVaultOpening'], reach: 24, wait: 90,
+  auto: ['objHBorder', 'objDeathWishRoof', 'objLSD', 'objFather'] };
+// TVs and monitors (objTVBig 215 step 0xc0af10, objWallTV step 0xc67670,
+// objComputerMonitorBlack/Grey steps 0x5eff60 / 0x5fa6b0; their objBullet and
+// objEBullet collisions 0xc01da0 / 0xc065a0 and kin): a round from either side
+// plays sndBottleBreak and runs the Break sprite, which ends on the Broken one
+// with image_speed 0 (objWallTV has no Broken sprite and stays on its last
+// Break frame). The break speed is a guess from the step's constants, the
+// round flies on, and the parts and shards they throw are left out.
+export const SCREENS = { sound: 'sndBottleBreak', imageSpeed: 0.25, objects: {
+  objTVBig: ['sprTVBigBreak', 'sprTVBigBroken'], objWallTV: ['sprWallTVBreak', null],
+  objComputerMonitorBlack: ['sprComputerMonitorBlackBreak', 'sprComputerMonitorBlackBroken'],
+  objComputerMonitorGrey: ['sprComputerMonitorGreyBreak', 'sprComputerMonitorGreyBroken'] } };
 // objFloorCleared (create 0x7b45a0, step 0x7b5240) shows sprFloorCleared
 // (frame 0 FLOOR CLEARED, 1 AREA CLEARED) once the floor is clear; its slide
 // in is not read, so it sits centred 44px above the bottom of the view.
@@ -742,10 +774,13 @@ export async function play(env) {
     return e;
   };
   const isEnemy = (o) => o && !BOSS_WHO[o.name] && o.sprite >= 0 && (inherits(G, o, 'objEnemy') || inherits(G, o, 'objVictim'));
-  const enemies = room.insts.filter(i => isEnemy(G.objects.get(i.obj))).map(i => Object.assign(mkEnemy(i.obj, i.x, i.y), { inst: i }));
+  // A hub room the player cleared earlier (app.js hubNext) comes back as they
+  // left it: no enemies, its bodies and loose weapons where they lay.
+  const saved = env.carry?.level?.rooms?.[room.name];
+  const enemies = saved ? [] : room.insts.filter(i => isEnemy(G.objects.get(i.obj))).map(i => Object.assign(mkEnemy(i.obj, i.x, i.y), { inst: i }));
   // The couple counts as an enemy until it splits; the two it becomes are made
   // now so their sprites load.
-  for (const i of room.insts.filter(i => G.objects.get(i.obj)?.name === COUPLE.obj)) {
+  for (const i of saved ? [] : room.insts.filter(i => G.objects.get(i.obj)?.name === COUPLE.obj)) {
     for (const n of COUPLE.idle) need(n);
     const pair = COUPLE.split.map(([name, dy]) => {
       const to = G.objects.list.find(q => q.name === name);
@@ -755,6 +790,7 @@ export async function play(env) {
       imageSpeed: COUPLE.imageSpeed, sprite: need(COUPLE.idle[0]), spr: { idle: need(COUPLE.idle[0]) } });
   }
   const kos = [], dead = [], bullets = [];
+  if (saved) for (const d of saved.dead) if (need(d.sprite)) dead.push({ ...d, speed: 0 });
   const BOSS = {
     ...sonBossDefinitions(room, G),
     objBearBoss: { k: BEAR, make: () => ({ wait: BEAR.eat, hold: BEAR.hold, sprite: BEAR.spr.eat, imageSpeed: 0.1 }) },
@@ -770,7 +806,7 @@ export async function play(env) {
 
   // Loose weapons: objWeapon children the player can hold.
   const wbox = maskBox(G, { mask: sprByName.get('sprWeaponMask')?.id ?? -1, sprite: -1 });
-  const weapons = room.insts.filter(i => {
+  const weapons = saved ? saved.weapons.filter(w => need(w.sprite)).map(w => ({ ...w })) : room.insts.filter(i => {
     const o = G.objects.get(i.obj);
     return o && inherits(G, o, 'objWeapon') && arm[o.name.slice(3)];
   }).map(i => {
@@ -797,6 +833,34 @@ export async function play(env) {
     return { inst: i, kind: o.name, x: i.x, y: i.y, box: maskBox(G, o), off: false, live: false,
       sprite: o.name === 'objNextroom' ? arrow : need(G.sprites.get(o.sprite).name), frame: edges.indexOf(Math.min(...edges)) };
   });
+  const starts = room.insts.filter(i => G.objects.get(i.obj)?.name === START_POINT.object).sort((a, b) => a.id - b.id);
+  const near = (a, b) => Math.hypot(a.x - spawn.x, a.y - spawn.y) - Math.hypot(b.x - spawn.x, b.y - spawn.y);
+  const entry = spawn ? [...starts].sort(near)[0] : starts.find(s => !exits.some(x => overlap(s, ZERO, x, x.box))) || starts[0];
+  if (entry && !exits.length && !room.insts.some(i => G.objects.get(i.obj)?.name === ELEVATOR.object)) {
+    const r = START_POINT.reach;
+    for (const i of starts) if (i !== entry) {
+      const edges = [room.w - i.x, i.y, i.x, room.h - i.y];
+      exits.push({ inst: i, kind: START_POINT.object, x: i.x, y: i.y, box: { l: -r, r, t: -r, b: r }, off: false, live: false,
+        sprite: arrow, frame: edges.indexOf(Math.min(...edges)) });
+    }
+  }
+  const lifts = room.insts.some(i => G.objects.get(i.obj)?.name === ELEVATOR.object);
+  if (!exits.length && !lifts) {
+    const r = ROOM_END.reach, box = { l: -r, r, t: -r, b: r };
+    const ends = room.insts.filter(i => ROOM_END.objects.includes(G.objects.get(i.obj)?.name));
+    // The lone start point is where the player came in, so it stays off until they step off it.
+    for (const i of ends.length ? ends : starts.length === 1 ? starts : []) {
+      const edges = [room.w - i.x, i.y, i.x, room.h - i.y];
+      exits.push({ inst: i, kind: G.objects.get(i.obj).name, x: i.x, y: i.y, box, off: i === entry, live: false,
+        sprite: arrow, frame: edges.indexOf(Math.min(...edges)) });
+    }
+  }
+
+  const screens = room.insts.filter(i => SCREENS.objects[G.objects.get(i.obj)?.name]).map(i => {
+    const o = G.objects.get(i.obj), [brk, broken] = SCREENS.objects[o.name];
+    return { inst: i, x: i.x, y: i.y, box: maskBox(G, o), sprite: need(G.sprites.get(o.sprite).name), frame: 0, speed: 0, hit: false,
+      brk: need(brk), broken: broken && need(broken) };
+  }).filter(s => s.sprite && s.brk);
 
   const elevators = room.insts.filter(i => G.objects.get(i.obj)?.name === ELEVATOR.object).map(i => {
     const o = G.objects.get(i.obj), mask = G.sprites.list.find(s => s.name === ELEVATOR.mask);
@@ -862,7 +926,7 @@ export async function play(env) {
 
   // Pre-render the room into the layers under and over the player, leaving
   // out everything that moves.
-  const dynamic = new Set([spawn, ...enemies.map(e => e.inst), ...doors.map(d => d.inst), ...weapons.map(w => w.inst), ...exits.map(x => x.inst), ...elevators.map(l => l.inst), ...bosses.flatMap(b => [b.inst, b.actor].filter(Boolean)), film?.inst]);
+  const dynamic = new Set([spawn, ...enemies.map(e => e.inst), ...doors.map(d => d.inst), ...weapons.map(w => w.inst), ...exits.map(x => x.inst), ...screens.map(s => s.inst), ...elevators.map(l => l.inst), ...bosses.flatMap(b => [b.inst, b.actor].filter(Boolean)), film?.inst]);
   const layer = (keep) => {
     const c = new OffscreenCanvas(room.w, room.h), cx = c.getContext('2d');
     drawRoomItems(cx, items, imgs, keep, dynamic);
@@ -913,11 +977,14 @@ export async function play(env) {
   const menuAt = room.insts.find(i => /^obj(Mask|CobraMask|SonStyle)Menu$/.test(G.objects.get(i.obj)?.name));
   const car = menuAt && room.insts.find(i => inherits(G, G.objects.get(i.obj), 'objCar'));
   const carAt = car && (d => ({ x: car.x + lenX(CAR_EXIT, d), y: car.y + lenY(CAR_EXIT, d) }))(pointDir(car.x, car.y, room.w / 2, room.h / 2));
-  const from = spawn || bossEnter || carAt || menuAt;
+  const from = spawn || entry || bossEnter || carAt || menuAt;
+  if (carry && entry && !spawn && !carry.elevator) { carry.x = entry.x; carry.y = entry.y; }
   const clear = (x, y) => carry || spawn || enemies.every(e => Math.hypot(e.x - x, e.y - y) > 64);
   const lift = carry?.elevator && elevators.reduce((a, l) => !a || Math.abs(l.x - carry.elevator.x) < Math.abs(a.x - carry.elevator.x) ? l : a, null);
   if (lift) { carry.x = lift.to.x; carry.y = lift.to.y; }
-  const at = carry ? nearestFree(sol, box, carry.x, carry.y)
+  // A smaller room after a big floor (rmBankVault after the back room) cannot take the carried spot.
+  const fits = carry && carry.x >= 0 && carry.y >= 0 && carry.x < room.w && carry.y < room.h;
+  const at = fits ? nearestFree(sol, box, carry.x, carry.y)
     : nearestFree(sol, box, from ? from.x : room.w >> 1, from ? from.y : room.h >> 1, clear);
   const p = { x: at.x, y: at.y, hs: 0, vs: 0, aim: 0, dir: 0, frame: 0, sprite: P.walk, attack: null, attackFrame: 0, cooldown: 0, weapon: null, exec: null,
     ammo: 0, barrel: -1, dead: null, roll: null, rollCool: 0, spread: false, flash: 0, punch: 0 };
@@ -1088,6 +1155,8 @@ export async function play(env) {
     for (let i = 0; i < n; i++) {
       b.x += dx; b.y += dy;
       if (b.x < -BULLET.margin || b.y < -BULLET.margin || b.x > room.w + BULLET.margin || b.y > room.h + BULLET.margin) return false;
+      const screen = screens.find(s => !s.hit && overlap(b, ZERO, s, s.box));
+      if (screen) { screen.hit = true; screen.sprite = screen.brk; screen.frame = 0; screen.speed = SCREENS.imageSpeed; sfx(SCREENS.sound); }
       if (b.x >= 0 && b.y >= 0 && b.x < room.w && b.y < room.h && solidAt(b.x, b.y)) return false;
       if (b.byPlayer) {
         const boss = bosses.find(q => q.kind === 'objColombianBoss' && overlap(b, ZERO, q, q.box));
@@ -1498,6 +1567,10 @@ export async function play(env) {
   const coupleRoom = !exits.length && !elevators.length && room.insts.some(i => G.objects.get(i.obj)?.name === COUPLE.obj);
   let cutWait = 0;
   let cleared = !enemies.some(e => e.isEnemy) && !bosses.length;
+  // A room with no other way out (ROOM_END) that had a fight or a scripted object.
+  const autoEnd = !exits.length && !elevators.length && !coupleRoom && !film && (!cleared || talks.length > 0 ||
+    room.insts.some(i => ROOM_END.auto.includes(G.objects.get(i.obj)?.name)));
+  let endWait = 0;
   function stepExits() {
     const clearFloor = !enemies.some(e => e.isEnemy) && !kos.length && !bosses.length;
     if (clearFloor && !cleared && exits.length) sfx(SOUND.cleared);
@@ -1506,11 +1579,12 @@ export async function play(env) {
       const on = overlap(p, box, x, x.box);
       if (x.off && !on) x.off = false;
       x.live = clearFloor && !x.off;
-      if (x.live && on && !p.dead && !p.exec) return leave();
+      if (x.live && on && !p.dead && !p.exec) return leave(null, x);
     }
     for (const l of elevators) if (stepElevator(l, clearFloor)) return leave(l);
     if (coupleRoom && !enemies.length && !kos.length && !p.exec && !p.dead && ++cutWait > COUPLE.cut) return leave();
     if (film?.arrived && !talks.length && !env.cutscene && ++film.wait > FILM_SET.after) return leave();
+    if (autoEnd && clearFloor && !talks.length && !env.cutscene && !p.dead && !p.exec && ++endWait > ROOM_END.wait) return leave();
   }
   // Returns true when the ride is over.
   function stepElevator(l, clearFloor) {
@@ -1534,10 +1608,12 @@ export async function play(env) {
     if (!moving) l.timer = ELEVATOR.wait;
     return false;
   }
-  function leave(lift) {
+  function leave(lift, exit) {
     handle.stop();
     handle.left = true;
-    const carried = { x: p.x, y: p.y, weapon: p.weapon, ammo: p.ammo, elevator: lift && { x: lift.x }, stats, character: pick.startsWith(pobj.name + ':') ? pick : pobj.name };
+    const carried = { x: p.x, y: p.y, weapon: p.weapon, ammo: p.ammo, elevator: lift && { x: lift.x }, stats, character: pick.startsWith(pobj.name + ':') ? pick : pobj.name,
+      exit: exit?.kind === 'objNextroom' && { x: exit.inst.x, y: exit.inst.y },
+      level: { rooms: { ...carry?.level?.rooms, [room.name]: { dead, weapons: weapons.map(w => ({ ...w, inst: null, speed: 0 })) } } } };
     if (!env.next || !env.next(room, carried)) env.status(`${room.name} cleared: this is the last room in order.`);
   }
 
@@ -1731,6 +1807,10 @@ export async function play(env) {
     for (const d of doors) stepDoor(d);
     for (const w of weapons) stepWeapon(w);
     for (const b of [...bullets]) if (!stepBullet(b)) bullets.splice(bullets.indexOf(b), 1);
+    for (const s of screens) if (s.speed && (s.frame += s.speed) >= frames(s.brk)) {
+      s.speed = 0;
+      if (s.broken) { s.sprite = s.broken; s.frame = 0; } else s.frame = frames(s.brk) - 1;
+    }
     for (const d of dead) if (d.burst) stepBurst(d);
     for (const q of [...splats]) if (!stepSplat(q)) splats.splice(splats.indexOf(q), 1);
     for (const q of pieces) if (q.speed > 0) {
@@ -1842,6 +1922,7 @@ export async function play(env) {
     }
     for (const d of dead) sprite(d.sprite, d.frame, d.x, d.y, -d.angle * RAD);
     for (const q of pieces) sprite(BURST.piece, 0, q.x, q.y, -q.angle * RAD);
+    for (const s of screens) sprite(s.sprite, s.frame, s.x, s.y, 0);
     for (const l of elevators) sprite(l.sprite, Math.floor(l.frame), l.x, l.y, 0);
     for (const k of kos) sprite(k.sprite, k.frame, k.x, k.y, -(k.angle + (k.fallbackPose ? 90 : 0)) * RAD);
     for (const w of weapons) sprite(w.sprite, 0, w.x, w.y, -w.angle * RAD);

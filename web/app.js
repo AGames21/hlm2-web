@@ -243,8 +243,20 @@ async function startPlay(name = $('room').value, carry = null, track, character 
 // The floors of one level share a name up to their Floor/Part number, e.g.
 // rmFansLevel1Floor1 and rmFansLevel1Floor2. This grouping is a guess from
 // the names: the game itself ends a level when the player gets back to the car.
+// Levels whose screens have their own names are listed by room (from the
+// room order; the outro and talk rooms after them are left out).
+const LEVEL_ROOMS = [
+  [/^rmJungle(Place)?\d$/, 'rmJungle'], [/^rmDayJungle\d$|^rmHotel(Pool|Lobby|Upstairs|Outside)$/, 'rmDayJungle'],
+  [/^rmPowerPlant(Building|Cave)?\d$/, 'rmPowerPlant'], [/^rmSewers(Entrance|Floor\d)$/, 'rmSewers'],
+  [/^rmBoat(Dock|Deck\d|Below\d)$/, 'rmBoat'], [/^rmFansLevel5(Floor\d|RoofAccess|Roof)$/, 'rmFansLevel5'],
+  [/^rmSubway(Platform|Upstairs\d)$/, 'rmSubway'], [/^rmStripClub(Entrance|ChangingRoom|BackRoom)$/, 'rmStripClub'],
+  [/^rmBank(Entrance|SideRoom|BackRoom|Vault)$/, 'rmBank'], [/^rmNightmare(PoliceOffice|Floor[456])$/, 'rmNightmare'],
+  [/^rm(LSD(Intro|Floor\d|Gate|Roof)|BearBoss|ZebraBoss(Aftermath)?|TigersDen|SwanBoss)$/, 'rmLSD'],
+];
 const levelOf = name => {
   const n = name.replace(/Hard$/, '').replace(/MovieSet$/, ''), m = n.replace(/((Floor|Part|Downstairs)\d+[A-Z]?)+$/, '');
+  const family = LEVEL_ROOMS.find(([re]) => re.test(n));
+  if (family) return family[1];
   return m !== n ? m : n.replace(/\d+[A-Z]?$/, '');
 };
 const isHard = name => /Hard$/.test(name);
@@ -261,6 +273,45 @@ async function showScore(level, stats) {
   return continued;
 }
 
+// Hub levels: objNextroom's target is a tag string (its var 40) set by
+// instance creation code, which the room tables do not carry. At room start
+// (0x939700) the player arrives on the exit with the same tag, and exits back
+// to rooms already done show sprGreyArrow (0x937ad0). Here an exit leads to
+// the room of the same level with an exit on the same spot (stairs) or on the
+// facing edge at the same place along it, the closest match winning, and the
+// player steps in `inset` px from an edge. A guess from the room layouts.
+// Once every hub room is cleared the exits go on in room order (skipping the
+// rooms done), which ends the level; the walk back to the car is not ported.
+const HUB = { levels: ['rmBank', 'rmStripClub', 'rmBoat', 'rmSonMansion', 'rmSubway'], edge: 48, stairs: 40, along: 128, inset: 24 };
+const exitsOf = r => r.insts.filter(i => G.objects.get(i.obj)?.name === 'objNextroom');
+const edgeOf = (r, i) => { const d = [r.w - i.x, i.y, i.x, r.h - i.y], m = Math.min(...d); return m <= HUB.edge ? d.indexOf(m) : -1; };
+const hubRooms = room => G.rooms.list.filter(r => levelOf(r.name) === levelOf(room.name) && isHard(r.name) === isHard(room.name) && !/Test$/.test(r.name) && exitsOf(r).length);
+function hubLink(room, at) {
+  const e = edgeOf(room, at);
+  let best = null;
+  for (const r of hubRooms(room)) {
+    if (r === room) continue;
+    for (const i of exitsOf(r)) {
+      const f = edgeOf(r, i);
+      const d = e < 0 && f < 0 ? Math.hypot(i.x - at.x, i.y - at.y) : e >= 0 && f === (e + 2) % 4 ? Math.abs(e % 2 ? i.x - at.x : i.y - at.y) : Infinity;
+      if (d <= (e < 0 ? HUB.stairs : HUB.along) && d < (best?.d ?? Infinity)) best = { room: r, inst: i, d, edge: f };
+    }
+  }
+  return best;
+}
+// The room an exit leads to inside a hub level, with the arrival point set in
+// `carry`; null when the level goes on in room order.
+function hubNext(room, carry) {
+  if (!carry?.exit || !HUB.levels.includes(levelOf(room.name))) return null;
+  if (hubRooms(room).every(r => carry.level?.rooms[r.name])) return null;
+  const link = hubLink(room, carry.exit);
+  if (!link) return null;
+  const k = HUB.inset, step = [[-k, 0], [0, k], [k, 0], [0, -k]][link.edge] || [0, 0];
+  carry.x = link.inst.x + step[0]; carry.y = link.inst.y + step[1];
+  return link.room;
+}
+const done = (r, carry) => !!carry?.level?.rooms[r.name];
+
 // An exit was taken: play the next room in the game's room order
 // (room_goto_next). The Hard copies and test rooms that sit in the order are
 // skipped unless the run is in Hard. At the end of a level the score screen
@@ -269,10 +320,10 @@ async function showScore(level, stats) {
 function nextFloor(room, carry) {
   if (story) return storyNext(room, carry);
   const order = G.rooms.order;
-  let next = null;
+  let next = hubNext(room, carry);
   for (let i = order.indexOf(room.id) + 1; i > 0 && i < order.length && !next; i++) {
     const r = G.rooms.list.find(r => r.id === order[i]);
-    if (r && !/Test$/.test(r.name) && (isHard(room.name) || !isHard(r.name))) next = r;
+    if (r && !/Test$/.test(r.name) && (isHard(room.name) || !isHard(r.name)) && !done(r, carry)) next = r;
   }
   const sameLevel = next && levelOf(next.name) === levelOf(room.name);
   const go = () => {
@@ -344,10 +395,10 @@ function startLevel() {
 function storyNext(room, carry) {
   if (story.intro) { startLevel(); return true; }
   const order = G.rooms.order;
-  let next = null;
+  let next = hubNext(room, carry);
   for (let i = order.indexOf(room.id) + 1; i > 0 && i < order.length && !next; i++) {
     const r = G.rooms.list.find(r => r.id === order[i]);
-    if (r && !/Test$/.test(r.name) && !isHard(r.name)) next = r;
+    if (r && !/Test$/.test(r.name) && !isHard(r.name) && !done(r, carry)) next = r;
   }
   if (next && levelOf(next.name) === levelOf(room.name)) {
     startPlay(next.name, carry, undefined).catch(e => { status('Play failed: ' + e.message); console.error(e); });
