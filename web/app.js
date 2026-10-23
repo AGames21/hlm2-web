@@ -3,7 +3,7 @@
 // depth first).
 import { Wad } from './agar.js';
 import * as T from './tables.js';
-import { play, musicFor } from './game.js';
+import { play, musicFor, SOUND } from './game.js';
 import { Audio, RemoteFile } from './audio.js';
 import { scoreScreen } from './score.js';
 import { frontEnd, card, maskMenu, PICKER_OBJECTS, abortMenu, STORY, progress, options } from './menu.js';
@@ -253,6 +253,7 @@ async function showScore(level, stats) {
   scoreController?.abort();
   const controller = new AbortController();
   scoreController = controller;
+  G.audio?.play(SOUND.levelComplete);
   const continued = await scoreScreen(G, $('canvas'), level, stats, {
     signal: controller.signal, paused: () => $('settings-dialog').open,
   });

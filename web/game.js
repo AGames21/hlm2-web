@@ -171,7 +171,10 @@ export const BULLET = { margin: 100 };
 // read. Executions: the execution sounds are not read either; here sndHit
 // plays as the execution starts and on each new frame of the body's kill
 // sprite (one per blow), sndPunch once for a non-lethal one.
-export const SOUND = { exec: 'sndHit', swing: ['sndSwing1', 'sndSwing2'], punch: 'sndPunch', hit: 'sndHit', thrown: 'sndWeaponHit',
+// objPigKillStomp/objPigKillBlunt (0xa62510, 0xa610d0) play sndPunch and
+// sndHit together on a blow; here both play once as the execution starts.
+// objLevelCleared's create (0x8b2d10) plays sndLevelComplete.
+export const SOUND = { exec: 'sndHit', execThud: 'sndPunch', levelComplete: 'sndLevelComplete', swing: ['sndSwing1', 'sndSwing2'], punch: 'sndPunch', hit: 'sndHit', thrown: 'sndWeaponHit',
   door: 'sndDoorHit', doorOpen: 'sndDoorOpen', pickup: 'sndPickUpWeapon', throw: 'sndThrow', cleared: 'sndFloorCleared' };
 // Level music: the scene setters 0x8d6f00 (normal) and 0x11c5bf0 (hard) give
 // each scene its first room and track ("\Name.mp3", played from
@@ -608,9 +611,13 @@ export async function play(env) {
   const fan = FANS[pick.startsWith(pobj.name + ':') ? pick : pobj.name];
   const sprByName = new Map(G.sprites.list.map(s => [s.name, s]));
   const art = new Map();
+  let started = false;
   const need = (name) => {
     const s = sprByName.get(name), hit = s && env.frames(name);
     if (!hit?.frames.length) return null;
+    // One first wanted mid-room (an enemy getting up unarmed) loads now and
+    // is skipped by the draw until its atlas is in.
+    if (!art.has(name) && started) env.load(hit.atlas);
     art.set(name, { s, hit });
     return name;
   };
@@ -719,6 +726,8 @@ export async function play(env) {
       // sprColombianAttackMachette is spelt so in the wad.
       e.spr.attack = need(base + 'Attack' + held) || need(base + 'Attack' + held + '1') || (held === 'Machete' && need(base + 'AttackMachette'));
       e.spr.legs = need(base + 'Legs');
+      // A knocked out one gets up unarmed: load those sprites with the room.
+      if (!e.g) { need(base + 'WalkUnarmed'); need(base + 'AttackUnarmed'); }
       Object.assign(e, { hs: 0, vs: 0, moveDir: 0, legFrame: 0, alarm: 1, check: Math.floor(random(ENEMY.recheck)), cooldown: 0, wait: 0, seen: null,
         still: /Static/.test(o.name) });
       e.imageSpeed = 0;
@@ -848,6 +857,7 @@ export async function play(env) {
 
   if (sonScene) for (const [face] of (TALKS[room.id] || []).flat()) if (face) need(face);
   await Promise.all([...art.values()].map(a => env.load(a.hit.atlas)));
+  started = true;
   if (env.cancelled?.()) return null;
 
   // Pre-render the room into the layers under and over the player, leaving
@@ -1130,7 +1140,7 @@ export async function play(env) {
       const own = k.spr.exec, d = { x: k.x, y: k.y, angle: k.angle, sprite: own, frame: frames(own) - 1, imageSpeed: 0 };
       p.exec = { x: k.x, y: k.y, angle: k.angle, sprite: own, frame: 0, duration: frames(own), body: { ...d }, hit: Infinity, after: d };
       p.x = k.x; p.y = k.y; p.hs = p.vs = 0;
-      sfx(SOUND.exec);
+      sfx(SOUND.exec); sfx(SOUND.execThud);
       return true;
     }
     if (fan?.nonLethal) {
@@ -1148,7 +1158,7 @@ export async function play(env) {
     dead.push(d);
     bleed(k.x, k.y, k.angle, true);
     p.exec = { x: k.x, y: k.y, angle: k.angle + 180, sprite: kill, frame: 0, duration, body: d, hit: 0 };
-    sfx(SOUND.exec);
+    sfx(SOUND.exec); sfx(SOUND.execThud);
     p.x = k.x; p.y = k.y; p.hs = p.vs = 0;
     return true;
   }
@@ -1356,6 +1366,7 @@ export async function play(env) {
         }
         if (!g && see && d < (e.dog ? DOG.kill : ENEMY.melee)) {
           if (e.spr.attack && e.sprite !== e.spr.attack) { e.sprite = e.spr.attack; e.frame = 0; }
+          if (!p.dead && !p.exec) sfx(e.dog ? SOUND.punch : SOUND.hit);
           killPlayer(P.deadBlunt, e.angle);
         }
       }
@@ -1364,9 +1375,15 @@ export async function play(env) {
       if (e.dog && e.spr.run) { e.sprite = e.spr.run; if (e.hs || e.vs) e.imageSpeed = Math.max(e.imageSpeed, DOG.runImage); }
     }
     // path_start moves along the path without collision checks, so a box
-    // wider than the 16-px cells can clip a corner.
-    if (e.path) { e.x += e.hs; e.y += e.vs; }
-    else {
+    // wider than the 16-px cells clips corners and ends up drawn inside
+    // walls. Port choice: the path step slides on walls instead (a blocked
+    // chaser asks for a new path), and only a body already in a wall moves
+    // freely, to get out.
+    if (e.path && !free(sol, e.box, e.x, e.y)) { e.x += e.hs; e.y += e.vs; }
+    else if (e.path) {
+      const mx = moveAxis(sol, e.box, e, 'x', e.hs), my = moveAxis(sol, e.box, e, 'y', e.vs);
+      if (!mx && !my) e.repath = 0;
+    } else {
       if (!moveAxis(sol, e.box, e, 'x', e.hs) && e.alert) e.hs = 0;
       if (!moveAxis(sol, e.box, e, 'y', e.vs) && e.alert) e.vs = 0;
     }
@@ -1519,6 +1536,7 @@ export async function play(env) {
   }
   function leave(lift) {
     handle.stop();
+    handle.left = true;
     const carried = { x: p.x, y: p.y, weapon: p.weapon, ammo: p.ammo, elevator: lift && { x: lift.x }, stats, character: fan && (pick.startsWith(pobj.name + ':') ? pick : pobj.name) };
     if (!env.next || !env.next(room, carried)) env.status(`${room.name} cleared: this is the last room in order.`);
   }
@@ -1554,9 +1572,12 @@ export async function play(env) {
   // The exe picks the sign from quadrant tests; this is the same intent.
   function pushDoor(d, o, byPlayer) {
     if (Math.abs(d.v) > DOOR.maxPush) return;
+    // Only a door at rest makes the open sound: one leaning on a swinging
+    // door re-pushes it every step (a port choice, the exe's check is not read).
+    const still = !d.v;
     const a = (d.base + d.angle) * RAD, along = -(o.x - d.x) * Math.sin(a) - (o.y - d.y) * Math.cos(a);
     d.v = (along > 0 ? -1 : 1) * (d.h ? DOOR.pushH : DOOR.pushV);
-    if (byPlayer) sfx(SOUND.doorOpen);
+    if (byPlayer && still) sfx(SOUND.doorOpen);
     d.byPlayer = byPlayer;
   }
   function stepDoor(d) {
@@ -1750,13 +1771,13 @@ export async function play(env) {
 
   // angle is in canvas radians (clockwise).
   function sprite(name, frame, x, y, angle) {
-    const a = name && art.get(name);
-    if (!a) return;
+    const a = name && art.get(name), img = a && imgs.get(a.hit.atlas);
+    if (!img) return;
     const f = a.hit.frames[Math.floor(frame) % a.hit.frames.length];
     cx.save();
     cx.translate(Math.round(x - cam.x), Math.round(y - cam.y));
     cx.rotate(angle);
-    cx.drawImage(imgs.get(a.hit.atlas), f.x, f.y, f.w, f.h, -a.s.ox, -a.s.oy, f.w, f.h);
+    cx.drawImage(img, f.x, f.y, f.w, f.h, -a.s.ox, -a.s.oy, f.w, f.h);
     cx.restore();
   }
 
@@ -1890,6 +1911,7 @@ export async function play(env) {
   // Handle for tests and for stopping.
   const handle = {
     room: room.name, stats, cam, splats, gore, player: p, keys, pressed, mouse, solids: sol, box, enemies, bosses, kos, dead, doors, weapons, bullets, exits, elevators, talks, talkers, step, draw, leave,
+    left: false, talking: () => !!env.cutscene && !env.cutscene.done,
     diagnostics() {
       return {
         room: room.name, character: pobj.name, running, paused: !!env.paused?.(),
