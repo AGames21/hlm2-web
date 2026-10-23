@@ -347,3 +347,42 @@ mask `sprMask` (24×24, origin 12,12, fully solid).
   objCutsceneFader (rmEditor) are not used in gameplay rooms.
 - Execution sounds, wall bounce of thrown weapons, the score screen's points, objFatMafiaLSD,
   bosses and NPCs
+
+## Son story encounter port (Codex branch)
+
+`web/bosses.js` owns the Colombian confrontation and LSD opening hooks. These
+are scripted encounters, rather than two new chase bosses. The executable event
+table at `0x1987640` has no handlers in any of its five slots for `objBoss` (1837),
+and its object record has no sprite. The real LSD room instead contains
+`objLSDIntro` and `objSonTakeLSD`. Do not invent combat AI for this marker.
+
+Colombian source: create `0x6627d0`, step `0x6629f0`, bullet collision `0x661f60`
+(existing local Ghidra query d24). Decoded values include the approach rectangle
+x 456–496/y <432, scripted x 480/y 232 alignment, horizontal/vertical walking
+1/2, legs 0.15, idle animation 0.1, and 220-step waits. The character is Son even
+when the room contains a scripted player object. Boss instances are excluded
+from ordinary enemies to prevent duplicate damage/death. Dialogue uses only
+existing string-ID pages and the player's runtime WAD. Exits remain locked until
+the encounter controller releases them.
+
+**Partial fidelity, not a completed executable port:** the Colombian henchmen's
+scripted firing and chair movement are not implemented. Guesses/approximations:
+direct-room spawn (480,464); grouping the last two dialogue pages together;
+requiring the final shot after dialogue, with a 12px melee fallback; a stationary
+corpse and chair instead of their original motion. The existing collision handler
+accepts bullets from state 2; this port absorbs them until its final state to keep
+the dialogue controller alive. It does not claim that timing is original.
+
+For the LSD opening, a runtime WAD pose and conversation precede free Son
+movement and the normal exit. Guesses: animation speed 0.1, 60-step hold, fallback
+spawn (284,372), and a collision-safe release near (316,396). Drug effects, sink
+interaction, NPC transformations, shotgun interaction, and the full controller
+state machine remain unported. Ghidra query c1 could not run because its script
+compiler was denied access to installed library jars. The Python app-execution
+alias also could not run. These are evidence gaps, not verified original behavior.
+
+Run the usual unit/browser suites. Optional local real-data smoke check:
+`node tests/browser/son-bosses.cjs`, with Playwright on NODE_PATH and CHROMIUM_PATH
+set as for the normal browser suite. It serves the user's local hlm2-data only
+on loopback, injects simulation inputs, checks dialogue release/damage/exit
+handoff, and saves screenshots to TEMP. It does not compare against Steam runtime.
