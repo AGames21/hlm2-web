@@ -125,6 +125,18 @@ id, year, month, day, hour, minute); the card is drawn bottom-left and fades by 
 Guesses: splat count/spread/speed, camera lead and ease, the card's layout and hold time.
 Test hook: `window.runScene(i)` starts story scene i.
 
+## Using the website
+
+1. Open https://agames21.github.io/hlm2-web/.
+2. Click **Load game files** (or drag the files onto the page) and pick
+   `hlm2_data_desktop.wad` from the game folder (Steam: right-click the game, Manage,
+   Browse local files). Add `hlm2_music_desktop.wad` too for the real music.
+3. Pick NEW GAME in the title menu. The browser keeps the files, so each device loads them once.
+
+The game fits the window by default (**Settings → Window scale** picks a fixed 1x–4x instead).
+**Music** opens the music and YouTube player; **Level tools** opens the room picker for
+jumping straight into any level. Both stay folded away until needed, and the page remembers.
+
 ## Run
 
 For code-only development, run `node server.js` (no dependency install or build).
@@ -186,13 +198,13 @@ node server.js "C:/Program Files (x86)/Steam/steamapps/common/Hotline Miami 2"
 ```
 
 Open http://127.0.0.1:8077. With a game folder given, the page fetches the wad from
-`/game/` by itself. Without one, use **Load .wad**. Either way the wad is kept in the
+`/game/` by itself. Without one, use **Load game files**. Either way the wad is kept in the
 browser's IndexedDB, so each device needs it only once. To reach the server from other
 machines set `HOST=0.0.0.0`, and keep that private (LAN or Tailscale only).
 
 Online: https://agames21.github.io/hlm2-web/ (GitHub Pages, deployed from `web/` on every
 push to `main` by `.github/workflows/pages.yml`). It holds code only, so each device loads
-its own wad with **Load .wad**.
+its own wad with **Load game files**.
 
 ## Layout
 
@@ -330,5 +342,8 @@ mask `sprMask` (24×24, origin 12,12, fully solid).
 
 - The room background entries and the view fields
 - `hlm2_atlases.bin`, `collision_events`, `fonts`
+- objEffector's draw (0x76e190, about 22 KB): the per-room global screen controller (it also takes
+  Escape and R and counts frames). Its screen effects are not ported. objFader (rmLevelSelect) and
+  objCutsceneFader (rmEditor) are not used in gameplay rooms.
 - Execution sounds, wall bounce of thrown weapons, the score screen's points, objFatMafiaLSD,
   bosses and NPCs
