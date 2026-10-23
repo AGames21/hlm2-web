@@ -10,6 +10,8 @@
 // walk speed + 2, which caps diagonals. animSpeed is still a guess.
 import { drawRoomItems } from './render.js';
 import { options, gameKey } from './settings.js';
+import { TALKS, TALKERS } from './conversations.js';
+import { conversation, TALK } from './dialogue.js';
 
 export const MOVE = { accel: 0.5, maxSpeed: 3, friction: 0.5, diagSlack: 2, diagScale: 0.98, animSpeed: 0.25 };
 const VIEW_W = 480, VIEW_H = 270, STEP_MS = 1000 / 60;
@@ -696,6 +698,36 @@ export async function play(env) {
       sprite: need(G.sprites.get(o.sprite).name),
       to: { x: i.x + lenX(ELEVATOR.reach, ELEVATOR.angle), y: i.y + lenY(ELEVATOR.reach, ELEVATOR.angle) } };
   });
+
+  // Cutscene talk: the talker objects (NPCs, props and scene scripts that
+  // call the dialogue dispatcher) pass the page index as their talk goes on.
+  // Here the room's scenes play in order: one starts shortly after the room
+  // does when a talker has no sprite (a scene script) or there is no talker,
+  // else when the player walks up to any talker.
+  const talkers = room.insts.filter(i => TALKERS.has(G.objects.get(i.obj)?.name));
+  const script = !talkers.length || talkers.some(t => G.objects.get(t.obj).sprite < 0);
+  const talks = (TALKS[room.id] || []).map((pages, k) => {
+    for (const [face] of pages) if (face) need(face);
+    const near = talkers.filter(t => G.objects.get(t.obj).sprite >= 0);
+    return { pages, at: script && k === 0 || !near.length ? null : near };
+  });
+  let talkClock = 0;
+  const drawFace = (c, name, frame, x, y, h) => {
+    const a = art.get(name);
+    if (!a) return 0;
+    const f = a.hit.frames[Math.floor(frame) % a.hit.frames.length], k = Math.min(1, h / f.h);
+    c.drawImage(imgs.get(a.hit.atlas), f.x, f.y, f.w, f.h, x, y + (h - f.h * k) / 2, Math.round(f.w * k), Math.round(f.h * k));
+    return Math.round(f.w * k);
+  };
+  function stepTalk() {
+    talkClock++;
+    if (env.cutscene && !env.cutscene.done || p.dead) return;
+    if (!talks.length) { if (env.cutscene) { env.cutscene = null; env.talkDone?.(); } return; }
+    const t = talks[0];
+    if (talkClock < TALK.startDelay || t.at && !t.at.some(a => Math.hypot(p.x - a.x, p.y - a.y) <= TALK.reach)) return;
+    talks.shift();
+    env.cutscene = conversation(G, t.pages, { drawFace });
+  }
 
   await Promise.all([...art.values()].map(a => env.load(a.hit.atlas)));
   if (env.cancelled?.()) return null;
@@ -1419,6 +1451,9 @@ export async function play(env) {
 
   function step() {
     if (env.paused?.()) { keys.clear(); pressed.clear(); mouse.click = mouse.right = false; return; }
+    // A cutscene (dialogue box) holds the room still and eats the input.
+    stepTalk();
+    if (env.cutscene?.step({ pressed, mouse, player: p })) { pressed.clear(); mouse.click = mouse.right = false; return; }
     if (!p.dead) stats.steps++;
     stepPlayer();
     for (const b of [...bosses]) (b.kind === 'objPrisonBoss' ? stepPrison : stepBear)(b);
@@ -1524,6 +1559,7 @@ export async function play(env) {
     cx.drawImage(over, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
     cx.restore();
     hud();
+    env.cutscene?.draw(cx, VIEW_W, VIEW_H);
     if (cleared && exits.length + elevators.length && clearedArt) {
       const f = clearedArt.hit.frames[0];
       cx.drawImage(imgs.get(clearedArt.hit.atlas), f.x, f.y, f.w, f.h, Math.round((VIEW_W - f.w) / 2), VIEW_H - CLEARED.bottom, f.w, f.h);
@@ -1553,7 +1589,7 @@ export async function play(env) {
 
   // Handle for tests and for stopping.
   const handle = {
-    room: room.name, stats, cam, player: p, keys, pressed, mouse, solids: sol, box, enemies, bosses, kos, dead, doors, weapons, bullets, exits, elevators, step, draw, leave,
+    room: room.name, stats, cam, player: p, keys, pressed, mouse, solids: sol, box, enemies, bosses, kos, dead, doors, weapons, bullets, exits, elevators, talks, talkers, step, draw, leave,
     diagnostics() {
       return {
         room: room.name, character: pobj.name, running, paused: !!env.paused?.(),

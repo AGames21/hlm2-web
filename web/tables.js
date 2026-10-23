@@ -34,6 +34,25 @@ function byId(lookup, list) {
   return id => (id >= 0 && id < lookup.length && lookup[id] >= 0 ? list[lookup[id]] : null);
 }
 
+// Assets/hlm2_localization.bin: u32 sections, then per section u32 index,
+// u32 name length, name ("String IDs", "English", ...), u32 language id,
+// u32 count, count u32 offsets, u32 blob size, null-terminated strings.
+// Returns the strings of one language, indexed like LOC_STR_<n> (the game's
+// string ids). The text stays in the player's own wad.
+export function localization(buf, lang = 'English') {
+  const dv = new DataView(buf), u8 = new Uint8Array(buf);
+  const sections = dv.getUint32(0, true);
+  let o = 4;
+  for (let s = 0; s < sections && o < buf.byteLength; s++) {
+    const n = dv.getUint32(o + 4, true), name = utf8.decode(u8.subarray(o + 8, o + 8 + n));
+    o += 8 + n;
+    const count = dv.getUint32(o + 4, true), offs = o + 8, blob = offs + 4 * count + 4;
+    if (name === lang) return Array.from({ length: count }, (_, i) => cstr(u8, blob + dv.getUint32(offs + 4 * i, true)));
+    o = blob + dv.getUint32(offs + 4 * count, true);
+  }
+  return [];
+}
+
 // 16 words: id, w, h, origin x, origin y, bbox left, right, top, bottom,
 // frame count, ..., name offset at 14.
 export function sprites(buf) {

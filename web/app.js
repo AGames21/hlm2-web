@@ -100,6 +100,7 @@ async function openGame(blob, progress = status) {
     rooms: T.rooms(rms), levelAtlas: T.levelAtlases(lvl), masks: T.collisionMasks(msk),
     frames: new Map(), images: new Map(),
     sounds: T.sounds(snd),
+    text: T.localization(await wad.bytes('Assets/hlm2_localization.bin')),
   };
   // Index every atlas frame by sprite name: name -> [{atlas, frames}].
   const metas = wad.names('Atlases/').filter(n => n.endsWith('.meta'));
@@ -220,7 +221,9 @@ async function startPlay(name = $('room').value, carry = null, track, character 
     status: message => { if (request === menuToken) status(message); },
     cancelled: () => request !== menuToken,
     paused: () => $('settings-dialog').open,
-    restart: () => startPlay(room.name, carry, track, character), next: nextFloor };
+    restart: () => startPlay(room.name, carry, track, character), next: nextFloor,
+    // The story's intro room hands over to the level once its talk is over.
+    talkDone: () => { if (story?.intro && request === menuToken) setTimeout(() => request === menuToken && story.intro && startLevel(), 600); } };
   $('canvas').hidden = false;
   $('intro').hidden = true;
   const started = await play(env);
@@ -321,7 +324,7 @@ async function runScene(i) {
   if (room) {
     story = { i, intro: true };
     if (await startPlay(room.name, null, s.introTrack)) {
-      status(`${s.scene} ${s.title}: intro-room preview. Scripted dialogue is not implemented yet. Enter starts the level; Esc returns to the menu.`);
+      status(`${s.scene} ${s.title}: Space or click moves the talk on; Enter skips to the level; Esc returns to the menu.`);
     }
   } else startLevel();
 }
