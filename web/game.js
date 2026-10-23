@@ -1537,7 +1537,7 @@ export async function play(env) {
   function leave(lift) {
     handle.stop();
     handle.left = true;
-    const carried = { x: p.x, y: p.y, weapon: p.weapon, ammo: p.ammo, elevator: lift && { x: lift.x }, stats, character: fan && (pick.startsWith(pobj.name + ':') ? pick : pobj.name) };
+    const carried = { x: p.x, y: p.y, weapon: p.weapon, ammo: p.ammo, elevator: lift && { x: lift.x }, stats, character: pick.startsWith(pobj.name + ':') ? pick : pobj.name };
     if (!env.next || !env.next(room, carried)) env.status(`${room.name} cleared: this is the last room in order.`);
   }
 

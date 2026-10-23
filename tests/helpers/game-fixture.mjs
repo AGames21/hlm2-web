@@ -40,7 +40,7 @@ export async function fixture({ punch = true, getUp = true, getUpFrames = 6, exe
   };
   configure?.({ sprites, objects, room, addSprite });
   const env = {
-    G, room, canvas, carry, next, items: [], imgs: new Map(), zoom: 1, autostart: false, status() {},
+    G, room, canvas, carry, character: carry?.character, next, items: [], imgs: new Map(), zoom: 1, autostart: false, status() {},
     load: async () => {},
     frames(name) {
       if (!names.includes(name)) return null;

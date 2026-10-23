@@ -122,6 +122,23 @@ function installBot() {
     for (const e of g.enemies) if (e.isEnemy) add(e, 'enemy');
     for (const b of g.bosses) add(b, 'boss');
     if (!cands.length) {
+      // Arrival elevators stay disabled until the player walks completely out.
+      // Pick a reachable tile outside the used lifts before targeting a ride.
+      const used = g.elevators.filter(l => l.used);
+      if (used.length) {
+        const outside = (x, y) => used.every(l =>
+          Math.round(x) + g.box.l > Math.round(l.x) + l.box.r ||
+          Math.round(x) + g.box.r < Math.round(l.x) + l.box.l ||
+          Math.round(y) + g.box.t > Math.round(l.y) + l.box.b ||
+          Math.round(y) + g.box.b < Math.round(l.y) + l.box.t);
+        let best = null;
+        for (let i = 0; i < f.dist.length; i++) {
+          if (f.dist[i] < 0 || best && f.dist[i] >= best.d) continue;
+          const x = (i % B.nav.w) * CELL + CELL / 2, y = Math.floor(i / B.nav.w) * CELL + CELL / 2;
+          if (outside(x, y)) best = { x, y, d: f.dist[i] };
+        }
+        if (best) { add(used[0], 'step off elevator', best.x, best.y); return cands[0]; }
+      }
       const live = g.exits.filter(x => x.live);
       for (const x of live) add(x, 'exit', x.x + ((x.box?.l ?? 0) + (x.box?.r ?? 0)) / 2, x.y + ((x.box?.t ?? 0) + (x.box?.b ?? 0)) / 2);
       for (const l of g.elevators) add(l, 'elevator', l.x + ((l.box?.l ?? 0) + (l.box?.r ?? 0)) / 2, l.y + ((l.box?.t ?? 0) + (l.box?.b ?? 0)) / 2);

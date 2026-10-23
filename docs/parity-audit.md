@@ -1,0 +1,64 @@
+# Original-game comparison: 2026-10-23
+
+The browser port is **not yet equivalent to the original game**.
+
+## Shipped deploy-test correction
+
+Commit `0ee98b2` fixed a race in the second-floor browser test. GitHub run
+39968772972 passed all checks and deployed Pages. The published `game.js` was
+compared byte for byte with that commit and matched.
+
+## Additional corrections
+
+- Character identity now survives floor handoff for every playable character,
+  rather than only characters with Fans/mask abilities. Real-file runs previously
+  switched the Soldier, Henchman and Rat to the Pig on later floors. The second
+  run retains their original object identities and art; explicit room spawns
+  still choose their specified actor.
+- The bot now walks out of a used arrival elevator before trying to ride it.
+  All four false elevator stalls from the first run disappeared.
+- Local regression verification: 43 simulation tests and 30 browser checks passed.
+
+## Real-file bot comparison
+
+Both runs used the user's original WAD files, the actual port simulation and its
+input handlers. Baseline: 367 attempts, 87 distinct rooms, 13 forced-leave room
+failures, zero page exceptions. After corrections: 366 attempts, 87 distinct
+rooms, 9 forced-leave room failures, zero page exceptions.
+
+Attempts include deaths and restarts. The bot steps simulation manually, uses
+path/combat assists and may remove enemies, teleport or force a room transition.
+Its reaching the final menu is **not** proof of an unassisted full-game clear.
+Randomized AI and changed character behavior also make aggregate bug counts
+unsuitable as a controlled performance comparison.
+
+## Still different or unresolved
+
+- Missing endings: rmJungle1, rmDayJungle1-3, rmPowerPlant1-2,
+  rmSewersEntrance, rmPoliceStationFloor2Part2 and rmFansLevel5Floor3.
+- Son mansion floor-one traversal/exits remain blocked in the bot run.
+- Enemy-wall overlaps and unreachable-target reports remain; these require
+  individual original-room/mask and spawn checks before attributing a cause.
+- LSD intro moves the player 40 pixels when releasing its scripted scene.
+  `web/bosses.js` explicitly labels this couch-clearance handoff a guess.
+- Glass, monitors/TVs, dogs and knife-draw sound behavior remain incomplete.
+- The cached original-executable call index contains 110 sound names. Ninety
+  are not explicit literals in the browser source. This is a candidate list,
+  **not 90 proven missing effects**: sounds can be selected dynamically and
+  the index may be incomplete. For example, original pickup script 0x1157500
+  calls sndPickUpWeapon; sndDrawKnife is called by a separate 0x11d30f0 script.
+- Bosses, scripted NPCs, cutscenes, scoring, timing and visual effects still
+  contain documented approximations. No native-game live run or frame-by-frame
+  comparison was performed in this pass.
+
+## Original evidence and next work
+
+The audit JSON identifies the original executable by SHA-256 and records sound
+call addresses. Existing original handlers were inspected with the repository's
+PE/event-table tooling and cached Ghidra exports. Start/end behavior is spread
+across objStartPoint, objJungleReturn, player handlers and scene controllers;
+a generic automatic exit would conceal missing logic rather than port it.
+
+Next: recover and port those ending state machines, verify each affected room
+without forced exits, then compare native and browser timing/animation/audio
+for the same recorded inputs. Full original-game equivalence remains unverified.

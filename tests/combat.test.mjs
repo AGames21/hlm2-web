@@ -59,6 +59,22 @@ test('Floor handoff removes old input handlers and enables second-floor combat',
   assert.equal(second.game.room, 'rmTutorialFloor2');
 });
 
+test('A non-Fans character keeps its identity and art on a floor without a player spawn', async t => {
+  const configure = ({ objects, addSprite }) => {
+    objects[1].name = 'objNicke';
+    objects[1].sprite = addSprite('sprNickeWalkUnarmed');
+  };
+  let carry;
+  const first = await fixture({ roomName: 'rmTutorialFloor1', configure, next: (_, value) => { carry = value; return true; } });
+  t.after(() => first.game.stop());
+  first.game.leave();
+  assert.equal(carry.character, 'objNicke');
+  const second = await fixture({ carry, configure });
+  t.after(() => second.game.stop());
+  assert.equal(second.game.diagnostics().character, 'objNicke');
+  assert.equal(second.game.player.sprite, 'sprNickeWalkUnarmed');
+});
+
 test('Weapon pickup and melee hits still work with explicit attack state', async t => {
   const { game, canvas } = await fixture({ weapons: true }); t.after(() => game.stop());
   game.weapons.push({ name: 'Bat', x: game.player.x, y: game.player.y, speed: 0, ammo: 0, sprite: 'sprBat' });
