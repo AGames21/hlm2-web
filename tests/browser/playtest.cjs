@@ -357,7 +357,7 @@ async function punchAndFinish(page) {
       await page.waitForFunction(() => document.querySelector('#status').textContent.includes('1ST SCENE'));
       for (let i = 0; i < 2; i++) { await delay(450); await page.keyboard.press('Space'); }
       await page.waitForFunction(() => window.game?.room === 'rmFansHeadQuarters');
-      assert.match(await page.locator('#status').textContent(), /intro-room preview/);
+      assert.match(await page.locator('#status').textContent(), /Enter skips to the level/);
       assert.equal(await page.evaluate(() => +localStorage.getItem('hlm2-web-progress')), 1);
       await page.keyboard.press('Enter');
       await page.waitForFunction(() => window.game?.room === 'rmFansLevel1Floor1');

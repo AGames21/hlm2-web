@@ -100,7 +100,8 @@ async function openGame(blob, progress = status) {
     rooms: T.rooms(rms), levelAtlas: T.levelAtlases(lvl), masks: T.collisionMasks(msk),
     frames: new Map(), images: new Map(),
     sounds: T.sounds(snd),
-    text: T.localization(await wad.bytes('Assets/hlm2_localization.bin')),
+    // Optional: without the text file, talk scenes and date cards are skipped.
+    text: await wad.bytes('Assets/hlm2_localization.bin').then(b => T.localization(b), () => []),
   };
   // Index every atlas frame by sprite name: name -> [{atlas, frames}].
   const metas = wad.names('Atlases/').filter(n => n.endsWith('.meta'));
