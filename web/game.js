@@ -35,6 +35,28 @@ export const KO = { speedMin: 2, speedRand: 2, friction: 0.15, waitMin: 120, wai
 // objVictim1 (40) step: alert within 96px, then run at speed 2 for the spot
 // 24px below the door nearest (512, 69); cower (sprVictim1Idle2) within 29px.
 export const VICTIM1 = { alert: 96, cower: 29, speed: 2, walkSpeed: 0.25, cowerSpeed: 0.2, idleSpeed: 0.15, target: [512, 69], targetDy: 24 };
+// The first level's upstairs (rmTutorialFloor2). objVictim45Idle (105) is
+// the couple on the bed: its step (0xc37200) counts var 21 down, then makes
+// objVictim4 at y-12 and objVictim5 at y+12 and destroys itself; at the end of
+// each loop (0xc37180) it picks choose(Idle1, Idle1, Idle1, Idle2). What
+// starts the count is not read: here it is the player in sight within `near`
+// px, or any hit on them. objVictim4 (the man) and objVictim6 (the hall) share
+// the step 0x765de0, which plays sndPunch; it is not read. The man runs here as
+// an unarmed chaser. The hall man spawns a few steps from the player, so he
+// stays put and idles (a guess); he has one dead pose, used for every death.
+// objVictim5 (step 0xc38910) is not read either: she stays and idles. The
+// Pig's execution of her is sprPigDeadGirl, one 60x40 sprite holding both (the
+// size of sprVictim5Crawl); its last frame stays as the body. The room has no
+// exit: once nobody in it is left alive (or down) the scene cuts to the next
+// room in order (rmTutorialFloor2MovieSet) after `cut` steps (a guess at the
+// controller, not read).
+export const COUPLE = { obj: 'objVictim45Idle', imageSpeed: 0.15, near: 96, idle: ['sprVictim45Idle1', 'sprVictim45Idle1', 'sprVictim45Idle1', 'sprVictim45Idle2'],
+  split: [['objVictim4', -12], ['objVictim5', 12]], cut: 90 };
+export const VICTIMS = {
+  objVictim4: { walk: 'sprVictim4Walk', attack: 'sprVictim4Punch', legs: 'sprVictim4Legs' },
+  objVictim6: { dead: 'sprVictim6Dead' },
+  objVictim5: { exec: { sprPig: 'sprPigDeadGirl' } },
+};
 // objEditorDoorV (25) / objEditorDoorH (26): touching a door sets its swing
 // to +-8 (+-7 for H) degrees a step unless it already turns faster than 3.5.
 // It turns by that each step, bounces off walls at half speed, stops at
@@ -135,8 +157,10 @@ export const BULLET = { margin: 100 };
 // scrCombat plays sndPunch for a fist and sndHit for a weapon; a thrown
 // weapon hitting plays sndWeaponHit (0xc7fae0) and a door sndDoorHit.
 // Which sndHit/sndPunch branch of scrCombat matches which weapon is not fully
-// read, and execution sounds are not ported.
-export const SOUND = { swing: ['sndSwing1', 'sndSwing2'], punch: 'sndPunch', hit: 'sndHit', thrown: 'sndWeaponHit',
+// read. Executions: the execution sounds are not read either; here sndHit
+// plays as the execution starts and on each new frame of the body's kill
+// sprite (one per blow), sndPunch once for a non-lethal one.
+export const SOUND = { exec: 'sndHit', swing: ['sndSwing1', 'sndSwing2'], punch: 'sndPunch', hit: 'sndHit', thrown: 'sndWeaponHit',
   door: 'sndDoorHit', doorOpen: 'sndDoorOpen', pickup: 'sndPickUpWeapon', throw: 'sndThrow', cleared: 'sndFloorCleared' };
 // Level music: the scene setters 0x8d6f00 (normal) and 0x11c5bf0 (hard) give
 // each scene its first room and track ("\Name.mp3", played from
@@ -654,6 +678,14 @@ export async function play(env) {
       e.sprite = e.spr.idle;
       return e;
     }
+    const vic = VICTIMS[o.name];
+    if (vic?.exec?.[pre]) e.spr.exec = need(vic.exec[pre]);
+    if (vic?.dead) e.spr.deadShot = e.spr.deadShotgun = e.spr.deadBlunt = e.spr.killStomp = e.spr.killBlunt = need(vic.dead);
+    if (vic?.walk) {
+      Object.assign(e.spr, { walk: need(vic.walk), idle: need(vic.walk), attack: vic.attack ? need(vic.attack) : null, legs: need(vic.legs) });
+      Object.assign(e, { mafia: true, gun: null, g: null, hs: 0, vs: 0, moveDir: 0, legFrame: 0, alarm: 1, check: Math.floor(random(ENEMY.recheck)), cooldown: 0, wait: 0, seen: null,
+        still: true, imageSpeed: 0 });
+    }
     const fat = FAT.kinds[o.name];
     const armed = (fat || FACTION.test(o.name)) && (fat ? 'Unarmed' : (sname.match(/Walk(\w+)$/) || [])[1]);
     if (fat) {
@@ -691,6 +723,17 @@ export async function play(env) {
   };
   const isEnemy = (o) => o && !BOSS_WHO[o.name] && o.sprite >= 0 && (inherits(G, o, 'objEnemy') || inherits(G, o, 'objVictim'));
   const enemies = room.insts.filter(i => isEnemy(G.objects.get(i.obj))).map(i => Object.assign(mkEnemy(i.obj, i.x, i.y), { inst: i }));
+  // The couple counts as an enemy until it splits; the two it becomes are made
+  // now so their sprites load.
+  for (const i of room.insts.filter(i => G.objects.get(i.obj)?.name === COUPLE.obj)) {
+    for (const n of COUPLE.idle) need(n);
+    const pair = COUPLE.split.map(([name, dy]) => {
+      const to = G.objects.list.find(q => q.name === name);
+      return to && Object.assign(mkEnemy(to.id, i.x, i.y + dy), { inst: i });
+    }).filter(Boolean);
+    enemies.push({ inst: i, obj: i.obj, kind: COUPLE.obj, couple: true, pair, isEnemy: true, x: i.x, y: i.y, box, angle: 0, frame: 0,
+      imageSpeed: COUPLE.imageSpeed, sprite: need(COUPLE.idle[0]), spr: { idle: need(COUPLE.idle[0]) } });
+  }
   const kos = [], dead = [], bullets = [];
   const BOSS = {
     ...sonBossDefinitions(room, G),
@@ -923,7 +966,20 @@ export async function play(env) {
     weapons.push({ name: e.gun, x: e.x, y: e.y, angle: random(360), dir: random(360), speed: 2, ammo: GUNS[e.gun]?.ammo ?? 0, sprite: looseSprite[e.gun] });
     e.gun = null;
   }
+  // The couple splits into the man and the woman; a hit meant for the couple
+  // lands on the man.
+  function split(c) {
+    enemies.splice(enemies.indexOf(c), 1);
+    for (const e of c.pair) { enemies.push(e); if (e.mafia) Object.assign(e, { alert: true, seen: { x: p.x, y: p.y }, wait: ENEMY.recheck }); }
+    return c.pair.find(e => e.isEnemy) || c.pair[0];
+  }
+  function stepCouple(c) {
+    c.frame += c.imageSpeed;
+    if (c.frame >= frames(c.sprite)) { c.frame = 0; c.sprite = c.spr.idle = need(COUPLE.idle[Math.floor(random(COUPLE.idle.length))]); }
+    if (!p.dead && dist(c, p) < COUPLE.near && sees(c, p)) split(c);
+  }
   function knockOut(e, dir, sound) {
+    if (e.couple) e = split(e);
     if (e.dodger && sound === SOUND.thrown) return evade(e);
     if (e.dodger && sound === SOUND.door) {
       Object.assign(e, { sprite: e.spr.stunned, frame: 0, hs: 0, vs: 0, path: null, sleep: false, alert: true });
@@ -947,11 +1003,13 @@ export async function play(env) {
     e.sleep = false; e.alert = true;
   }
   function bulletHit(e, dir, shotgun) {
+    if (e.couple) e = split(e);
     if (e.dodger) evade(e); else shoot(e, dir, shotgun);
   }
   // A bullet kills outright. The dead sprites hold several poses; picking
   // one at random is a guess.
   function shoot(e, dir, shotgun, sprite) {
+    if (e.couple) e = split(e);
     if (e.fat && --e.hp > 0) return;
     const k = enemies.includes(e) ? enemies : kos;
     if (e.isEnemy) { stats.kills++; award(e.fat ? POINTS.fat : k === kos ? POINTS.downed : POINTS.kill, e.x, e.y); }
@@ -1042,12 +1100,20 @@ export async function play(env) {
     const animation = (held() ? held().kill : P.stomp), kill = animation || P.punch || P.walk;
     const duration = animation ? frames(animation) : 6;
     kos.splice(kos.indexOf(k), 1);
+    if (k.spr.exec) {
+      const own = k.spr.exec, d = { x: k.x, y: k.y, angle: k.angle, sprite: own, frame: frames(own) - 1, imageSpeed: 0 };
+      p.exec = { x: k.x, y: k.y, angle: k.angle, sprite: own, frame: 0, duration: frames(own), body: { ...d }, hit: Infinity, after: d };
+      p.x = k.x; p.y = k.y; p.hs = p.vs = 0;
+      sfx(SOUND.exec);
+      return true;
+    }
     if (fan?.nonLethal) {
       // The body stays down where it lay, in its knocked-out pose.
       if (k.isEnemy) award(POINTS.exec, k.x, k.y);
       const d = { x: k.x, y: k.y, angle: k.angle + (k.fallbackPose ? 90 : 0), sprite: k.sprite, frame: k.frame, imageSpeed: 0 };
       dead.push(d);
-      p.exec = { x: k.x, y: k.y, angle: k.angle + 180, sprite: kill, frame: 0, duration, body: { ...d } };
+      p.exec = { x: k.x, y: k.y, angle: k.angle + 180, sprite: kill, frame: 0, duration, body: { ...d }, hit: Infinity };
+      sfx(SOUND.punch);
       p.x = k.x; p.y = k.y; p.hs = p.vs = 0;
       return true;
     }
@@ -1055,7 +1121,8 @@ export async function play(env) {
     const d = { x: k.x, y: k.y, angle: k.angle, sprite: body, frame: 0, imageSpeed: EXEC.imageSpeed * frames(body) / duration };
     dead.push(d);
     bleed(k.x, k.y, k.angle, true);
-    p.exec = { x: k.x, y: k.y, angle: k.angle + 180, sprite: kill, frame: 0, duration, body: d };
+    p.exec = { x: k.x, y: k.y, angle: k.angle + 180, sprite: kill, frame: 0, duration, body: d, hit: 0 };
+    sfx(SOUND.exec);
     p.x = k.x; p.y = k.y; p.hs = p.vs = 0;
     return true;
   }
@@ -1081,6 +1148,7 @@ export async function play(env) {
     const x = p.exec;
     x.frame += EXEC.imageSpeed;
     x.body.frame = Math.min(x.body.frame + x.body.imageSpeed, frames(x.body.sprite) - 1);
+    if (Math.floor(x.body.frame) > x.hit) { x.hit = Math.floor(x.body.frame); sfx(SOUND.exec); bleed(x.x, x.y, x.angle, false); }
     if (x.frame < x.duration) return;
     x.body.frame = frames(x.body.sprite) - 1;
     x.body.imageSpeed = 0;
@@ -1089,6 +1157,7 @@ export async function play(env) {
     const at = nearestFree(sol, box, px, py);
     p.x = at.x; p.y = at.y;
     p.sprite = walkSprite();
+    if (x.after) dead.push(x.after);
     p.exec = null;
   }
 
@@ -1259,7 +1328,10 @@ export async function play(env) {
           if (!(--e.repath > 0)) { e.repath = PATH.every; e.path = pathTo(e, p.x, p.y); }
           followPath(e);
         }
-        if (!g && see && d < (e.dog ? DOG.kill : ENEMY.melee)) killPlayer(P.deadBlunt, e.angle);
+        if (!g && see && d < (e.dog ? DOG.kill : ENEMY.melee)) {
+          if (e.spr.attack && e.sprite !== e.spr.attack) { e.sprite = e.spr.attack; e.frame = 0; }
+          killPlayer(P.deadBlunt, e.angle);
+        }
       }
       if (e.hs || e.vs) e.moveDir = pointDir(0, 0, e.hs, e.vs);
       e.imageSpeed = (e.hs || e.vs) ? ENEMY.wanderAnim * Math.hypot(e.hs, e.vs) : 0;
@@ -1353,6 +1425,7 @@ export async function play(env) {
   // Victim1, the factions, dogs, idle, fat, dodger and hiding enemies are
   // ported; others stand and idle.
   function stepEnemy(e) {
+    if (e.couple) return stepCouple(e);
     if (e.idle) return stepIdle(e);
     if (e.dodger) return stepDodger(e);
     if (e.hiding) return stepHiding(e);
@@ -1379,6 +1452,8 @@ export async function play(env) {
   }
 
   // objNextroom step and collision: live once the floor is clear.
+  const coupleRoom = !exits.length && !elevators.length && room.insts.some(i => G.objects.get(i.obj)?.name === COUPLE.obj);
+  let cutWait = 0;
   let cleared = !enemies.some(e => e.isEnemy) && !bosses.length;
   function stepExits() {
     const clearFloor = !enemies.some(e => e.isEnemy) && !kos.length && !bosses.length;
@@ -1391,6 +1466,7 @@ export async function play(env) {
       if (x.live && on && !p.dead && !p.exec) return leave();
     }
     for (const l of elevators) if (stepElevator(l, clearFloor)) return leave(l);
+    if (coupleRoom && !enemies.length && !kos.length && !p.exec && !p.dead && ++cutWait > COUPLE.cut) return leave();
   }
   // Returns true when the ride is over.
   function stepElevator(l, clearFloor) {

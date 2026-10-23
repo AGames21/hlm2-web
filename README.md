@@ -307,6 +307,13 @@ mask `sprMask` (24×24, origin 12,12, fully solid).
 - **Knockout**: speed 2 + random(2) along the hit direction, friction 0.15, alarm 120 +
   random(100), then the GetUp sprite at 0.25 per step. Screen shake 2.
 - **objVictim1** (40): alert within 96, cowers (Idle2) within 29, runs at speed 2.
+- **objVictim45Idle** (tutorial bedroom couple): step 0xc37200 splits it into objVictim4 (y-12) and
+  objVictim5 (y+12) on sight within 96 or on a hit; anim-end 0xc37180 picks the next idle. objVictim4
+  fights unarmed; objVictim5's execution is sprPigDeadGirl. The room has no exit, so once it is empty
+  the port cuts to the next room after 90 steps (a guess; the controller is not read). objVictim6 (hall)
+  stays put and leaves sprVictim6Dead.
+- **Execution sounds**: sndHit at the start of a lethal execution and on each new body frame;
+  sndPunch once for a non-lethal one.
 - **Weapons** (`re/ghidra/out/d5t.c`, `d8t.c`): scrPigAttack sets image_speed 0.35, cooldown 30,
   start frame Punch 1, Hammer/Stick/Taser 3, Bat 4. scrPickupThrow scales the mask by 3 to find an
   objWeapon (parent 145); scrPickup 0x1157500 calls scrThrow 0x11d3830 first. scrThrow creates the
