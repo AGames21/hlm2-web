@@ -16,7 +16,7 @@ export const W = 480, H = 256;
 // then its level. act: the act card shown before the scene. Tracks are
 // Music/<name>.ogg: intro is the cutscene track, level the level track.
 export const STORY = [
-  { scene: 'PROLOGUE', title: 'MIDNIGHT ANIMAL', intro: null, level: 'rmTutorialFloor1', introTrack: null, track: 'Detection', film: true },
+  { scene: 'PROLOGUE', title: 'MIDNIGHT ANIMAL', intro: null, level: 'rmTutorialFloor1', introTrack: null, track: 'Detection', film: true, score: false },
   { scene: '1ST SCENE', title: 'DOWN UNDER', act: ['First Act', 'EXPOSITION'], intro: 'rmFansHeadQuarters', level: 'rmFansLevel1Floor1', introTrack: 'Blizzard', track: 'voyager' },
   { scene: '2ND SCENE', title: 'HOMICIDE', intro: 'rmDiner', level: 'rmMallFloor1', introTrack: 'Disturbance', track: 'Technoir' },
   { scene: '3RD SCENE', title: 'HARD NEWS', intro: 'rmCobraApartment1', level: 'rmNewsPaperFloor1', introTrack: 'MiamiJam', track: 'Divide' },

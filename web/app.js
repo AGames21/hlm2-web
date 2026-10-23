@@ -244,7 +244,7 @@ async function startPlay(name = $('room').value, carry = null, track, character 
 // rmFansLevel1Floor1 and rmFansLevel1Floor2. This grouping is a guess from
 // the names: the game itself ends a level when the player gets back to the car.
 const levelOf = name => {
-  const n = name.replace(/Hard$/, ''), m = n.replace(/((Floor|Part|Downstairs)\d+[A-Z]?)+$/, '');
+  const n = name.replace(/Hard$/, '').replace(/MovieSet$/, ''), m = n.replace(/((Floor|Part|Downstairs)\d+[A-Z]?)+$/, '');
   return m !== n ? m : n.replace(/\d+[A-Z]?$/, '');
 };
 const isHard = name => /Hard$/.test(name);
@@ -353,6 +353,8 @@ function storyNext(room, carry) {
     return true;
   }
   const s = STORY[story.i], i = story.i;
+  // The prologue is a film shoot: the game goes straight on, no score.
+  if (s.score === false) { progress.reach(i + 1); runScene(i + 1); return true; }
   status(`${s.title} cleared. Click or press a key to go on.`);
   showScore(s.title, carry?.stats || { kills: 0, steps: 0 }).then(continued => {
     if (!continued) return;

@@ -49,9 +49,20 @@ export const VICTIM1 = { alert: 96, cower: 29, speed: 2, walkSpeed: 0.25, cowerS
 // size of sprVictim5Crawl); its last frame stays as the body. The room has no
 // exit: once nobody in it is left alive (or down) the scene cuts to the next
 // room in order (rmTutorialFloor2MovieSet) after `cut` steps (a guess at the
-// controller, not read).
+// controller, not read). As in play footage, the screen fades to black over
+// `fade` steps and the Pig is left alone in a red glow until the cut.
 export const COUPLE = { obj: 'objVictim45Idle', imageSpeed: 0.15, near: 96, idle: ['sprVictim45Idle1', 'sprVictim45Idle1', 'sprVictim45Idle1', 'sprVictim45Idle2'],
-  split: [['objVictim4', -12], ['objVictim5', 12]], cut: 90 };
+  split: [['objVictim4', -12], ['objVictim5', 12]], cut: 170, fade: 50, glow: 90 };
+// rmTutorialFloor2MovieSet: the "CUT!" scene. The room sits above the film
+// set; objDirector (416,-144) walks down into it while the camera follows,
+// then the camera settles on the set and the talk plays. The Pig is not seen.
+// Speed, stop row and set centre are read off play footage, not the code.
+export const FILM_SET = { obj: 'objDirector', walk: 'sprDirectorWalk', speed: 1, imageSpeed: 0.2, stopY: 104, centre: [440, 144], ease: 0.04, after: 30 };
+// The rooms left at GameMaker's default colour (0xC0C0C0) have no backdrop
+// object; the game shows a slow purple and teal wash there instead (footage).
+// How far from its car the player starts (a guess from footage).
+export const CAR_EXIT = 40;
+export const WASH = { colour: 0xC0C0C0, a: [99, 7, 94], b: [21, 63, 78], period: 600, dark: 0.55 };
 export const VICTIMS = {
   objVictim4: { walk: 'sprVictim4Walk', attack: 'sprVictim4Punch', legs: 'sprVictim4Legs' },
   objVictim6: { dead: 'sprVictim6Dead' },
@@ -793,6 +804,8 @@ export async function play(env) {
   const talkers = room.insts.filter(i => TALKERS.has(G.objects.get(i.obj)?.name));
   const script = !talkers.length || talkers.some(t => G.objects.get(t.obj).sprite < 0);
   const sonScene = bosses.some(b => b.kind === 'objBoss' || b.kind === 'objColombianBoss');
+  const directorInst = room.insts.find(i => G.objects.get(i.obj)?.name === FILM_SET.obj);
+  const film = directorInst && { inst: directorInst, x: directorInst.x, y: directorInst.y, frame: 0, sprite: need(FILM_SET.walk), arrived: false, wait: 0 };
   const talks = (sonScene ? [] : TALKS[room.id] || []).map((pages, k) => {
     for (const [face] of pages) if (face) need(face);
     const near = talkers.filter(t => G.objects.get(t.obj).sprite >= 0);
@@ -827,6 +840,7 @@ export async function play(env) {
     if (env.cutscene && !env.cutscene.done || p.dead) return;
     if (!talks.length) { if (env.cutscene) { env.cutscene = null; env.talkDone?.(); } return; }
     const t = talks[0];
+    if (film && !film.arrived) return;
     if (talkClock < TALK.startDelay || t.at && !t.at.some(a => Math.hypot(p.x - a.x, p.y - a.y) <= TALK.reach)) return;
     talks.shift();
     env.cutscene = conversation(G, t.pages, { drawFace });
@@ -838,7 +852,7 @@ export async function play(env) {
 
   // Pre-render the room into the layers under and over the player, leaving
   // out everything that moves.
-  const dynamic = new Set([spawn, ...enemies.map(e => e.inst), ...doors.map(d => d.inst), ...weapons.map(w => w.inst), ...exits.map(x => x.inst), ...elevators.map(l => l.inst), ...bosses.flatMap(b => [b.inst, b.actor].filter(Boolean))]);
+  const dynamic = new Set([spawn, ...enemies.map(e => e.inst), ...doors.map(d => d.inst), ...weapons.map(w => w.inst), ...exits.map(x => x.inst), ...elevators.map(l => l.inst), ...bosses.flatMap(b => [b.inst, b.actor].filter(Boolean)), film?.inst]);
   const layer = (keep) => {
     const c = new OffscreenCanvas(room.w, room.h), cx = c.getContext('2d');
     drawRoomItems(cx, items, imgs, keep, dynamic);
@@ -883,10 +897,13 @@ export async function play(env) {
     stats.score += pts;
     popups.push({ text: pts + 'pts', x, y, t: POINTS.popup });
   };
-  // With no player instance the Son starts where his style menu sits (it is
-  // placed by his car; that the menu's spot is the start is a guess).
+  // With no player instance the player gets out of the level's car (objCar's
+  // children, e.g. objFansVan), as in play footage: a step toward the room's
+  // middle from it. With no car, where the mask or style menu sits (a guess).
   const menuAt = room.insts.find(i => /^obj(Mask|CobraMask|SonStyle)Menu$/.test(G.objects.get(i.obj)?.name));
-  const from = spawn || bossEnter || menuAt;
+  const car = menuAt && room.insts.find(i => inherits(G, G.objects.get(i.obj), 'objCar'));
+  const carAt = car && (d => ({ x: car.x + lenX(CAR_EXIT, d), y: car.y + lenY(CAR_EXIT, d) }))(pointDir(car.x, car.y, room.w / 2, room.h / 2));
+  const from = spawn || bossEnter || carAt || menuAt;
   const clear = (x, y) => carry || spawn || enemies.every(e => Math.hypot(e.x - x, e.y - y) > 64);
   const lift = carry?.elevator && elevators.reduce((a, l) => !a || Math.abs(l.x - carry.elevator.x) < Math.abs(a.x - carry.elevator.x) ? l : a, null);
   if (lift) { carry.x = lift.to.x; carry.y = lift.to.y; }
@@ -950,11 +967,20 @@ export async function play(env) {
     const xx = Math.round(x), yy = Math.round(y);
     return xx < 0 || yy < 0 || xx >= sol.w || yy >= sol.h || sol.grid[yy * sol.w + xx] === 1;
   };
-  // Line of sight: sample the wall grid every 4px.
+  // Line of sight: sample the wall grid every 4px. A door leaf blocks it
+  // too, so nobody sees through a shut door.
+  const cross = (o, p2, q, r) => (p2.x - o.x) * (r.y - q.y) - (p2.y - o.y) * (r.x - q.x);
+  const blocksSight = (a, b, d) => {
+    const q = { x: d.x, y: d.y }, r = { x: d.x + lenX(DOOR.length, d.base + d.angle), y: d.y + lenY(DOOR.length, d.base + d.angle) };
+    const den = cross(a, b, q, r);
+    if (!den) return false;
+    const t = ((q.x - a.x) * (r.y - q.y) - (q.y - a.y) * (r.x - q.x)) / den, u = ((q.x - a.x) * (b.y - a.y) - (q.y - a.y) * (b.x - a.x)) / den;
+    return t > 0 && t < 1 && u >= 0 && u <= 1;
+  };
   const sees = (a, b) => {
     const d = dist(a, b), n = Math.ceil(d / 4);
     for (let i = 1; i < n; i++) if (solidAt(a.x + (b.x - a.x) * i / n, a.y + (b.y - a.y) * i / n)) return false;
-    return true;
+    return !doors.some(dr => blocksSight(a, b, dr));
   };
   const aimDeg = () => (-p.aim / RAD + 360) % 360;
 
@@ -1148,7 +1174,7 @@ export async function play(env) {
     const x = p.exec;
     x.frame += EXEC.imageSpeed;
     x.body.frame = Math.min(x.body.frame + x.body.imageSpeed, frames(x.body.sprite) - 1);
-    if (Math.floor(x.body.frame) > x.hit) { x.hit = Math.floor(x.body.frame); sfx(SOUND.exec); bleed(x.x, x.y, x.angle, false); }
+    if (Math.floor(x.body.frame) > x.hit) { x.hit = Math.floor(x.body.frame); bleed(x.x, x.y, x.angle, false); }
     if (x.frame < x.duration) return;
     x.body.frame = frames(x.body.sprite) - 1;
     x.body.imageSpeed = 0;
@@ -1467,6 +1493,7 @@ export async function play(env) {
     }
     for (const l of elevators) if (stepElevator(l, clearFloor)) return leave(l);
     if (coupleRoom && !enemies.length && !kos.length && !p.exec && !p.dead && ++cutWait > COUPLE.cut) return leave();
+    if (film?.arrived && !talks.length && !env.cutscene && ++film.wait > FILM_SET.after) return leave();
   }
   // Returns true when the ride is over.
   function stepElevator(l, clearFloor) {
@@ -1665,8 +1692,10 @@ export async function play(env) {
     stepTalk();
     if (card) { if (card.hold > 0) card.hold--; else if ((card.alpha -= DATE_CARD.fade) <= 0) card = null; }
     if (env.cutscene?.step({ pressed, mouse, player: p })) { pressed.clear(); mouse.click = mouse.right = false; moveCamera(CAMERA.ease); return; }
-    if (!p.dead) stats.steps++;
-    stepPlayer();
+    if (film) stepFilm();
+    else if (!p.dead) stats.steps++;
+    // The cut holds the Pig still while the screen goes dark.
+    if (!film && !(cutWait > 0)) stepPlayer();
     for (const b of [...bosses]) {
       if (b.kind === 'objColombianBoss' || b.kind === 'objBoss') stepSonBoss(b, sonContext);
       else (b.kind === 'objPrisonBoss' ? stepPrison : stepBear)(b);
@@ -1698,7 +1727,20 @@ export async function play(env) {
     p.aim = Math.atan2(mouse.y + cam.y - p.y, mouse.x + cam.x - p.x);
   }
 
+  function stepFilm() {
+    p.sceneHidden = true; p.hs = p.vs = 0;
+    if (film.arrived) return;
+    film.y += FILM_SET.speed; film.frame += FILM_SET.imageSpeed;
+    if (film.y >= FILM_SET.stopY) { film.y = FILM_SET.stopY; film.arrived = true; film.frame = 0; talkClock = 0; }
+  }
   function moveCamera(ease) {
+    if (film) {
+      const [fx, fy] = film.arrived ? FILM_SET.centre : [film.x, film.y];
+      const tx = fx - VIEW_W / 2, ty = fy - VIEW_H / 2, k = film.arrived ? FILM_SET.ease : 1;
+      cam.fx = (cam.fx ?? tx) + (tx - (cam.fx ?? tx)) * k; cam.fy = (cam.fy ?? ty) + (ty - (cam.fy ?? ty)) * k;
+      cam.x = Math.round(cam.fx); cam.y = Math.round(cam.fy);
+      return;
+    }
     const tx = Math.max(0, Math.min(room.w - VIEW_W, p.x - VIEW_W / 2 + (mouse.x - VIEW_W / 2) * CAMERA.lead));
     const ty = Math.max(0, Math.min(room.h - VIEW_H, p.y - VIEW_H / 2 + (mouse.y - VIEW_H / 2) * CAMERA.lead));
     // The eased position is kept apart so the view lands on whole pixels.
@@ -1736,13 +1778,36 @@ export async function play(env) {
     cx.restore();
   }
 
+  // The couple room's fade: black over everything, then a red glow with the
+  // Pig drawn on it.
+  function drawCut() {
+    cx.save();
+    cx.fillStyle = `rgba(5,0,1,${Math.min(1, cutWait / COUPLE.fade)})`;
+    cx.fillRect(0, 0, VIEW_W, VIEW_H);
+    const g = Math.min(1, Math.max(0, (cutWait - COUPLE.fade) / 30));
+    if (g > 0) {
+      const x = Math.round(p.x - cam.x), y = Math.round(p.y - cam.y), r = cx.createRadialGradient(x, y, 0, x, y, COUPLE.glow);
+      r.addColorStop(0, `rgba(170,10,20,${0.85 * g})`); r.addColorStop(1, 'rgba(170,10,20,0)');
+      cx.fillStyle = r; cx.fillRect(0, 0, VIEW_W, VIEW_H);
+      cx.globalAlpha = g;
+      sprite(walkSprite(), 0, p.x, p.y, p.aim);
+    }
+    cx.restore();
+  }
+  let frameClock = 0;
   function draw() {
+    frameClock++;
     const c = room.colour;
     const shake = options.shake ? cam.shake : 0;
     const sx = Math.round((Math.random() * 2 - 1) * shake), sy = Math.round((Math.random() * 2 - 1) * shake);
     cx.save();
     cx.translate(sx, sy);
-    cx.fillStyle = `rgb(${c & 255},${(c >> 8) & 255},${(c >> 16) & 255})`;
+    if (c === WASH.colour) {
+      const k = (1 - Math.cos(frameClock * 2 * Math.PI / WASH.period)) / 2, mix = WASH.a.map((v, i) => Math.round(v + (WASH.b[i] - v) * k));
+      const g = cx.createLinearGradient(0, 0, 0, VIEW_H);
+      g.addColorStop(0, `rgb(${mix})`); g.addColorStop(1, `rgb(${mix.map(v => Math.round(v * WASH.dark))})`);
+      cx.fillStyle = g;
+    } else cx.fillStyle = `rgb(${c & 255},${(c >> 8) & 255},${(c >> 16) & 255})`;
     cx.fillRect(-4, -4, VIEW_W + 8, VIEW_H + 8);
     cx.drawImage(under, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
     cx.drawImage(gore, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
@@ -1769,6 +1834,7 @@ export async function play(env) {
       sprite(b.sprite, b.frame, b.x, b.y, -b.angle * RAD);
     }
     for (const x of exits) if (x.live) sprite(x.sprite, x.frame, x.x, x.y, 0);
+    if (film) sprite(film.sprite, film.arrived ? 0 : film.frame, film.x, film.y, -270 * RAD);
     for (const b of bullets) sprite(bulletSprite, 0, b.x, b.y, -b.dir * RAD);
     if (held()?.gun) {
       cx.font = 'bold 12px monospace';
@@ -1789,7 +1855,8 @@ export async function play(env) {
     }
     cx.drawImage(over, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
     cx.restore();
-    hud();
+    if (cutWait > 0) { drawCut(); return; }
+    if (!film) hud();
     env.cutscene?.draw(cx, VIEW_W, VIEW_H);
     if (card) drawCard();
     if (cleared && exits.length + elevators.length && clearedArt) {

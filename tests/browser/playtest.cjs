@@ -347,7 +347,7 @@ async function punchAndFinish(page) {
       assert.equal(await page.evaluate(() => window.game), null);
       assert.match(await page.locator('#status').textContent(), /^Arrows and Enter/);
     });
-    await check('Story score, act card, scene card, intro skip and saved progression', async () => {
+    await check('Prologue skips the score; act card, scene card, intro skip and saved progression', async () => {
       await page.keyboard.press('ArrowUp'); await page.keyboard.press('Enter');
       await page.waitForFunction(() => document.querySelector('#status').textContent.includes('PROLOGUE'));
       await delay(450); await page.keyboard.press('Space');
@@ -355,10 +355,12 @@ async function punchAndFinish(page) {
       // Place the fixture at each completed-floor boundary to test the story flow.
       await page.evaluate(() => { window.game.enemies.length = 0; window.game.stats.kills = 1; window.game.leave(); });
       await page.waitForFunction(() => window.game?.room === 'rmTutorialFloor2');
+      // The prologue is a film shoot: no score screen, straight to the next scene.
       await page.evaluate(() => { window.game.enemies.length = 0; window.game.leave(); });
-      await page.waitForFunction(() => document.querySelector('#status').textContent.includes('MIDNIGHT ANIMAL cleared'));
-      await delay(650); await page.keyboard.press('Space');
+      await page.waitForFunction(() => window.game?.room !== 'rmTutorialFloor2');
+      if (await page.evaluate(() => window.game?.room === 'rmTutorialFloor2MovieSet')) await page.evaluate(() => window.game.leave());
       await page.waitForFunction(() => document.querySelector('#status').textContent.includes('1ST SCENE'));
+      assert.doesNotMatch(await page.locator('#status').textContent(), /MIDNIGHT ANIMAL cleared/);
       for (let i = 0; i < 2; i++) { await delay(450); await page.keyboard.press('Space'); }
       await page.waitForFunction(() => window.game?.room === 'rmFansHeadQuarters');
       assert.match(await page.locator('#status').textContent(), /Enter skips to the level/);
