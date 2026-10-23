@@ -73,6 +73,11 @@ async function punchAndFinish(page) {
       assert.equal((await fetch(base + '/game/hlm2_data_desktop.wad')).status, 404);
     });
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    // Exercise frame scheduling independently of room-handle readiness.
+    if (process.env.PLAYTEST_FRAME_DELAY_MS) await context.addInitScript(ms => {
+      const request = window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame = callback => request(() => setTimeout(() => callback(performance.now()), ms));
+    }, Number(process.env.PLAYTEST_FRAME_DELAY_MS));
     const page = await context.newPage(), errors = [];
     page.on('pageerror', error => errors.push(error.message)); page.setDefaultTimeout(5000);
     await page.route('https://www.youtube.com/iframe_api', route => route.fulfill({ status: 200, contentType: 'application/javascript', body: require('./youtube-api.cjs') }));
@@ -202,6 +207,12 @@ async function punchAndFinish(page) {
       await page.evaluate(() => { window.oldGame = window.game; });
       await stepOntoExit(page); await page.waitForFunction(() => window.game?.room === 'rmTutorialFloor2');
       assert.equal(await page.evaluate(() => window.game.stats.kills), 1);
+      // The room handle is published before its first animation frame. Canvas
+      // resizing clears its pixels, so wait for rendering, not just the handle.
+      await page.waitForFunction(() => {
+        const pixel = document.querySelector('#canvas').getContext('2d').getImageData(0, 0, 1, 1).data;
+        return pixel[0] === 80 && pixel[1] === 60 && pixel[2] === 30 && pixel[3] === 255;
+      });
       const pixel = await page.evaluate(() => [...document.querySelector('#canvas').getContext('2d').getImageData(0, 0, 1, 1).data]);
       assert.deepEqual(pixel, [80, 60, 30, 255]);
       await punchAndFinish(page);

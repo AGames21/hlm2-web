@@ -71,3 +71,23 @@ NODE_PATH=/tmp/hlm2-playtest/node_modules node tests/browser/playtest.cjs
 Set `CHROMIUM_PATH` or `FFMPEG` if those executables are in custom locations.
 The Pages workflow runs both suites before uploading `web/`; the test fixtures
 and test tools are excluded from the published site.
+
+
+## 2026-10-23: Pages playtest frame race
+
+GitHub run 39966607696 (bf96774) failed the second-floor pixel assertion:
+the canvas was still transparent after the new room handle became available.
+That exception skipped the second-floor combat, so the score and Continue checks
+also failed. Room initialization resizes the canvas; the first draw happens on
+the animation loop, after the handle is published.
+
+The second-floor check now waits for the exact expected fixture pixel before
+continuing. It still asserts textures, combat, scoring and progression. Optional
+`PLAYTEST_FRAME_DELAY_MS=100` delays animation callbacks to exercise this timing.
+
+Verified locally on Windows with Node 24 and Chromium on 2026-10-23:
+42/42 simulation tests; 30/30 browser checks normally; 30/30 with the 100 ms
+frame delay. No uncaught browser exceptions. `git diff --check` passed.
+The corrected workflow has not run on Ubuntu/GitHub: this change is local and
+has not been pushed or published. These fixture checks do not prove the listed
+real-WAD completion bugs or remaining sound effects are fixed.
