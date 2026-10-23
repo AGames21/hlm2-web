@@ -12,6 +12,11 @@ import { drawRoomItems } from './render.js';
 import { options, gameKey } from './settings.js';
 import { TALKS, TALKERS } from './conversations.js';
 import { conversation, TALK } from './dialogue.js';
+import { DATES } from './dates.js';
+
+// Date card layout is a guess; the fade step is from objDate draw 0x6ca7d0.
+export const DATE_CARD = { hold: 180, fade: 0.01, margin: 8, line: 16, font: 'bold 13px monospace' };
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 export const MOVE = { accel: 0.5, maxSpeed: 3, friction: 0.5, diagSlack: 2, diagScale: 0.98, animSpeed: 0.25 };
 const VIEW_W = 480, VIEW_H = 270, STEP_MS = 1000 / 60;
@@ -720,6 +725,22 @@ export async function play(env) {
     const near = talkers.filter(t => G.objects.get(t.obj).sprite >= 0);
     return { pages, at: script && k === 0 || !near.length ? null : near };
   });
+  // The date card (objDate): place, date and time over a black backing,
+  // held, then faded out by 0.01 a frame (draw 0x6ca7d0).
+  let card = DATES[room.id] && G.text?.[DATES[room.id][0]] ? { row: DATES[room.id], hold: DATE_CARD.hold, alpha: 1 } : null;
+  function drawCard() {
+    const [id, y, mo, d, h, mi] = card.row, m = DATE_CARD.margin;
+    const rows = [G.text[id], `${MONTHS[mo - 1]} ${d}, ${y}`, `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`];
+    cx.save();
+    cx.globalAlpha = Math.min(1, card.alpha);
+    cx.font = DATE_CARD.font;
+    cx.textBaseline = 'top';
+    const w = Math.max(...rows.map(r => cx.measureText(r).width)) + m * 2, hgt = rows.length * DATE_CARD.line + m * 2;
+    const x0 = m, y0 = VIEW_H - hgt - m;
+    cx.fillStyle = '#000'; cx.fillRect(x0, y0, w, hgt);
+    rows.forEach((r, k) => { cx.fillStyle = k ? '#fff' : '#ff2ad4'; cx.fillText(r, x0 + m, y0 + m + k * DATE_CARD.line); });
+    cx.restore();
+  }
   let talkClock = 0;
   const drawFace = (c, name, frame, x, y, h) => {
     const a = art.get(name);
@@ -1490,6 +1511,7 @@ export async function play(env) {
     if (env.paused?.()) { keys.clear(); pressed.clear(); mouse.click = mouse.right = false; return; }
     // A cutscene (dialogue box) holds the room still and eats the input.
     stepTalk();
+    if (card) { if (card.hold > 0) card.hold--; else if ((card.alpha -= DATE_CARD.fade) <= 0) card = null; }
     if (env.cutscene?.step({ pressed, mouse, player: p })) { pressed.clear(); mouse.click = mouse.right = false; moveCamera(CAMERA.ease); return; }
     if (!p.dead) stats.steps++;
     stepPlayer();
@@ -1614,6 +1636,7 @@ export async function play(env) {
     cx.restore();
     hud();
     env.cutscene?.draw(cx, VIEW_W, VIEW_H);
+    if (card) drawCard();
     if (cleared && exits.length + elevators.length && clearedArt) {
       const f = clearedArt.hit.frames[0];
       cx.drawImage(imgs.get(clearedArt.hit.atlas), f.x, f.y, f.w, f.h, Math.round((VIEW_W - f.w) / 2), VIEW_H - CLEARED.bottom, f.w, f.h);

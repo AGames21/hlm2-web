@@ -400,6 +400,8 @@ async function start(blob) {
   loaded.audio.table = loaded.sounds;
   for (const key of loaded.audio.buffers.keys()) if (!key.startsWith('Music/')) loaded.audio.buffers.delete(key);
   G = window.G = loaded;
+  // Test hook: start a story scene by index.
+  window.runScene = runScene;
   $('menu').disabled = $('play').disabled = false;
   fillRooms();
   if (!location.hash || location.hash === '#menu') showMenu();
