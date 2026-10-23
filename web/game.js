@@ -360,6 +360,14 @@ export const WEAPON = { pickupScale: 3, throwSpeed: 12, friction: 0.25, spin: 3,
 // or KillStomp (scrExecute 0xf4b2f0). When it ends the player comes back with
 // the same weapon, 4px along angle + 90 after a hammer kill (0x1150350).
 // imageSpeed is a guess, and the body's speed is scaled to end with the pig's.
+// objSplat (create 0xb03090, step 0xb03640): a random sprSplat1-4, image
+// angle random(360), scale 0.8 + random(0.4), image speed 0.15; it slides
+// and slows, then stays on the floor. objBigBlood (0x4e2a40) leaves the pool
+// under a body. Counts, spread and speeds of a burst are guesses.
+export const BLOOD = { splats: ['sprSplat1', 'sprSplat2', 'sprSplat3', 'sprSplat4'], pool: ['sprBigBlood1', 'sprBigBlood2'],
+  scaleMin: 0.8, scaleRand: 0.4, imageSpeed: 0.15, count: 4, spread: 30, speedMin: 1, speedRand: 4, friction: 0.25 };
+// Camera: the view leads toward the mouse (a guess at objCamera's step).
+export const CAMERA = { lead: 0.2, ease: 0.15 };
 export const EXEC = { scale: 2, imageSpeed: 0.25, hammerShift: 4 };
 
 
@@ -685,6 +693,7 @@ export async function play(env) {
   });
 
   const arrow = need('sprArrow');
+  const splatSprites = BLOOD.splats.map(need).filter(Boolean), poolSprites = BLOOD.pool.map(need).filter(Boolean);
   const exits = room.insts.filter(i => EXIT.objects.includes(G.objects.get(i.obj)?.name) && G.objects.get(i.obj).sprite >= 0).map(i => {
     const o = G.objects.get(i.obj);
     const edges = [room.w - i.x, i.y, i.x, room.h - i.y];
@@ -741,6 +750,31 @@ export async function play(env) {
     return c;
   };
   const under = layer(i => i.depth >= pobj.depth), over = layer(i => i.depth < pobj.depth);
+  // Blood stays where it lands: settled splats are drawn once into this layer.
+  const gore = new OffscreenCanvas(room.w, room.h), goreCx = gore.getContext('2d'), splats = [];
+  const stamp = (name, frame, x, y, angle, scale) => {
+    const a = art.get(name);
+    if (!a) return;
+    const f = a.hit.frames[Math.floor(frame) % a.hit.frames.length];
+    goreCx.save(); goreCx.translate(x, y); goreCx.rotate(-angle * RAD); goreCx.scale(scale, scale);
+    goreCx.drawImage(imgs.get(a.hit.atlas), f.x, f.y, f.w, f.h, -a.s.ox, -a.s.oy, f.w, f.h);
+    goreCx.restore();
+  };
+  function bleed(x, y, dir, pool) {
+    if (pool && poolSprites.length) { const n = poolSprites[Math.floor(random(poolSprites.length))]; stamp(n, random(frames(n)), x, y, random(360), 1); }
+    for (let i = 0; i < BLOOD.count && splatSprites.length; i++) {
+      splats.push({ x, y, sprite: splatSprites[Math.floor(random(splatSprites.length))], frame: 0, angle: random(360),
+        scale: BLOOD.scaleMin + random(BLOOD.scaleRand), dir: dir + random(2 * BLOOD.spread) - BLOOD.spread, speed: BLOOD.speedMin + random(BLOOD.speedRand) });
+    }
+  }
+  function stepSplat(q) {
+    q.x += lenX(q.speed, q.dir); q.y += lenY(q.speed, q.dir);
+    q.speed = Math.max(0, q.speed - BLOOD.friction);
+    q.frame = Math.min(q.frame + BLOOD.imageSpeed, frames(q.sprite) - 1);
+    if (q.speed || q.frame < frames(q.sprite) - 1) return true;
+    stamp(q.sprite, q.frame, q.x, q.y, q.angle, q.scale);
+    return false;
+  }
 
   // Most rooms have no player instance; then start near the centre, clear of enemies.
   // Coming up from the floor before, the player stays where they were.
@@ -864,6 +898,7 @@ export async function play(env) {
     k.splice(k.indexOf(e), 1);
     dropGun(e);
     const s = sprite || (shotgun && e.spr.deadShotgun) || e.spr.deadShot;
+    bleed(e.x, e.y, dir ?? e.angle, true);
     if (e.burst) dead.push({ x: e.x, y: e.y, angle: e.angle, sprite: s, frame: 0, imageSpeed: BURST.speed, burst: true });
     else if (e.fat) dead.push({ x: e.x, y: e.y, angle: e.angle, sprite: s, frame: 1, imageSpeed: 0 });
     else if (s) dead.push({ x: e.x, y: e.y, angle: dir, sprite: s, frame: Math.floor(random(frames(s))), imageSpeed: 0 });
@@ -873,6 +908,7 @@ export async function play(env) {
     if (p.dead || p.exec) return;
     const s = sprite || P.deadShot;
     p.dead = { sprite: s, angle: dir, frame: s ? Math.floor(random(frames(s))) : 0 };
+    bleed(p.x, p.y, dir, true);
     p.hs = p.vs = 0;
     env.status('Dead. Press R to restart the room.');
   }
@@ -941,6 +977,7 @@ export async function play(env) {
     if (k.isEnemy) { stats.kills++; award(POINTS.exec, k.x, k.y); }
     const d = { x: k.x, y: k.y, angle: k.angle, sprite: body, frame: 0, imageSpeed: EXEC.imageSpeed * frames(body) / duration };
     dead.push(d);
+    bleed(k.x, k.y, k.angle, true);
     p.exec = { x: k.x, y: k.y, angle: k.angle + 180, sprite: kill, frame: 0, duration, body: d };
     p.x = k.x; p.y = k.y; p.hs = p.vs = 0;
     return true;
@@ -1453,7 +1490,7 @@ export async function play(env) {
     if (env.paused?.()) { keys.clear(); pressed.clear(); mouse.click = mouse.right = false; return; }
     // A cutscene (dialogue box) holds the room still and eats the input.
     stepTalk();
-    if (env.cutscene?.step({ pressed, mouse, player: p })) { pressed.clear(); mouse.click = mouse.right = false; return; }
+    if (env.cutscene?.step({ pressed, mouse, player: p })) { pressed.clear(); mouse.click = mouse.right = false; moveCamera(CAMERA.ease); return; }
     if (!p.dead) stats.steps++;
     stepPlayer();
     for (const b of [...bosses]) (b.kind === 'objPrisonBoss' ? stepPrison : stepBear)(b);
@@ -1468,6 +1505,7 @@ export async function play(env) {
     for (const w of weapons) stepWeapon(w);
     for (const b of [...bullets]) if (!stepBullet(b)) bullets.splice(bullets.indexOf(b), 1);
     for (const d of dead) if (d.burst) stepBurst(d);
+    for (const q of [...splats]) if (!stepSplat(q)) splats.splice(splats.indexOf(q), 1);
     for (const q of pieces) if (q.speed > 0) {
       q.x += lenX(q.speed, q.dir); q.y += lenY(q.speed, q.dir);
       q.speed = Math.max(0, q.speed - BURST.friction);
@@ -1479,9 +1517,16 @@ export async function play(env) {
     if (!running) return;
     // The shake's decay rate is a guess.
     cam.shake = Math.max(0, cam.shake - 0.2);
-    cam.x = Math.max(0, Math.min(room.w - VIEW_W, p.x - VIEW_W / 2));
-    cam.y = Math.max(0, Math.min(room.h - VIEW_H, p.y - VIEW_H / 2));
+    moveCamera(CAMERA.ease);
     p.aim = Math.atan2(mouse.y + cam.y - p.y, mouse.x + cam.x - p.x);
+  }
+
+  function moveCamera(ease) {
+    const tx = Math.max(0, Math.min(room.w - VIEW_W, p.x - VIEW_W / 2 + (mouse.x - VIEW_W / 2) * CAMERA.lead));
+    const ty = Math.max(0, Math.min(room.h - VIEW_H, p.y - VIEW_H / 2 + (mouse.y - VIEW_H / 2) * CAMERA.lead));
+    // The eased position is kept apart so the view lands on whole pixels.
+    cam.fx = (cam.fx ?? tx) + (tx - (cam.fx ?? tx)) * ease; cam.fy = (cam.fy ?? ty) + (ty - (cam.fy ?? ty)) * ease;
+    cam.x = Math.round(cam.fx); cam.y = Math.round(cam.fy);
   }
 
   // angle is in canvas radians (clockwise).
@@ -1523,6 +1568,15 @@ export async function play(env) {
     cx.fillStyle = `rgb(${c & 255},${(c >> 8) & 255},${(c >> 16) & 255})`;
     cx.fillRect(-4, -4, VIEW_W + 8, VIEW_H + 8);
     cx.drawImage(under, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
+    cx.drawImage(gore, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
+    for (const q of splats) {
+      const a = art.get(q.sprite);
+      if (!a) continue;
+      const f = a.hit.frames[Math.floor(q.frame) % a.hit.frames.length];
+      cx.save(); cx.translate(Math.round(q.x - cam.x), Math.round(q.y - cam.y)); cx.rotate(-q.angle * RAD); cx.scale(q.scale, q.scale);
+      cx.drawImage(imgs.get(a.hit.atlas), f.x, f.y, f.w, f.h, -a.s.ox, -a.s.oy, f.w, f.h);
+      cx.restore();
+    }
     for (const d of dead) sprite(d.sprite, d.frame, d.x, d.y, -d.angle * RAD);
     for (const q of pieces) sprite(BURST.piece, 0, q.x, q.y, -q.angle * RAD);
     for (const l of elevators) sprite(l.sprite, Math.floor(l.frame), l.x, l.y, 0);
@@ -1583,13 +1637,14 @@ export async function play(env) {
     draw();
     next();
   };
+  moveCamera(1);
   if (env.autostart !== false) next();
   canvas.focus?.({ preventScroll: true });
   env.status(`Playing ${room.name} as ${pobj.name}: use your movement keys or arrows, mouse to aim, left click to attack, right click to pick up or throw. Change keys in Settings. Esc or Stop to leave.`);
 
   // Handle for tests and for stopping.
   const handle = {
-    room: room.name, stats, cam, player: p, keys, pressed, mouse, solids: sol, box, enemies, bosses, kos, dead, doors, weapons, bullets, exits, elevators, talks, talkers, step, draw, leave,
+    room: room.name, stats, cam, splats, gore, player: p, keys, pressed, mouse, solids: sol, box, enemies, bosses, kos, dead, doors, weapons, bullets, exits, elevators, talks, talkers, step, draw, leave,
     diagnostics() {
       return {
         room: room.name, character: pobj.name, running, paused: !!env.paused?.(),
