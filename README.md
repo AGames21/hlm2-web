@@ -337,6 +337,13 @@ mask `sprMask` (24×24, origin 12,12, fully solid).
   matching exits. objElevator step 0x76a430: with no objEnemy or objKnockedOut left and the player on
   sprElevatorFloor, image_index rises 0.25 a step to 14 (doors open), then objLoadLevel; not fully read.
   Next room is `room_goto_next`, i.e. the second index array of `hlm2_rooms.bin`.
+- **Pickers** (`d35t.c`–`d37t.c`): objMaskMenu, objCobraMaskMenu (create 0x654060) and
+  objSonStyleMenu (create 0xb94470) share the keypress code 0x655570/0x655860: the selection runs
+  0..n−1, wraps and skips locked items. Names and notes are read from the text file. The choice
+  abilities are guesses from the notes: Jake's throws kill, Irvin starts with a shotgun, Dallas
+  kills with fists and takes no weapons; the Son's first style rolls (Corey's numbers), the second
+  kills with punches and takes no weapons, and the third fires twice. A room with no player
+  instance (the Son's) starts the player at the menu.
 
 ## Not decoded yet
 

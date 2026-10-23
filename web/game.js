@@ -78,6 +78,19 @@ export const FANS = {
   objPlayerTiger: { lethal: true, noPickup: true, punch: ['AttackPunch1', 'AttackPunch2'], stomp: 'Kill' },
   objPlayerZebra: { stomp: 'KillBash', roll: { sprite: 'sprZebraRoll', cooldown: 30, invulnerable: 19, speed: 4, imageSpeed: 0.5 } },
   objPlayerSwanChainsaw: { lethal: true, noPickup: true, punch: ['AttackChainsaw'], stomp: 'KillChainsaw1' },
+  // Jake's masks and the Son's styles (menu.js PICKERS). What each does is read
+  // from the menus' own notes (string ids 3051..3062), not from the player
+  // code: Jake's throws kill; Irvin starts armed (the gun is a guess: the first
+  // of 9mm/Shotgun Jake has sprites for); Dallas takes no weapons, and his fists
+  // killing like Tony's is a guess. The Son's first style rolls (sprSonRoll, the
+  // roll numbers copied from Corey's), the second kills with punches and takes
+  // no weapons, the third fires every gun twice (a guess at "firepower").
+  'objPlayerCobra:0': { lethalThrow: true },
+  'objPlayerCobra:1': { start: ['9mm', 'Shotgun'] },
+  'objPlayerCobra:2': { lethal: true, noPickup: true },
+  'objSon:0': { roll: { sprite: 'sprSonRoll', cooldown: 30, invulnerable: 19, speed: 4, imageSpeed: 0.5 } },
+  'objSon:1': { lethal: true, noPickup: true },
+  'objSon:2': { doubleFire: true },
   objPlayerBear: { stomp: 'Stomp', special: { walk: 'sprBearWalkSpecial', arm: 'sprBearArm', shoulder: 9, flash: 3, label: 'MP5 x2',
     gun: { ammo: 64, imageSpeed: 0, cooldown: 4, shake: 3, pellets: 1, spread: 6, speed: 12, speedRand: 4, muzzle: 33, sound: 'sndMP5' } } },
 };
@@ -542,8 +555,11 @@ export async function play(env) {
   // (the bear's step sets sprSonWalkUnarmed). Otherwise the Pig.
   const byName = n => n && G.objects.list.find(o => o.name === n);
   const bossWho = room.insts.map(i => BOSS_WHO[G.objects.get(i.obj)?.name]).find(Boolean);
-  const pobj = spawn ? G.objects.get(spawn.obj) : byName(env.character) || byName(bossWho) || byName('objPigButcher');
-  const fan = FANS[pobj.name];
+  // env.character is a player object name, or '<object>:<pick>' from the Jake
+  // and Son menus (the same object, played differently).
+  const pick = env.character || '', pickObj = pick.split(':')[0];
+  const pobj = spawn ? G.objects.get(spawn.obj) : byName(pickObj) || byName(bossWho) || byName('objPigButcher');
+  const fan = FANS[pick.startsWith(pobj.name + ':') ? pick : pobj.name];
   const sprByName = new Map(G.sprites.list.map(s => [s.name, s]));
   const art = new Map();
   const need = (name) => {
@@ -809,15 +825,23 @@ export async function play(env) {
     stats.score += pts;
     popups.push({ text: pts + 'pts', x, y, t: POINTS.popup });
   };
+  // With no player instance the Son starts where his style menu sits (it is
+  // placed by his car; that the menu's spot is the start is a guess).
+  const menuAt = room.insts.find(i => /^obj(Mask|CobraMask|SonStyle)Menu$/.test(G.objects.get(i.obj)?.name));
+  const from = spawn || bossEnter || menuAt;
   const clear = (x, y) => carry || spawn || enemies.every(e => Math.hypot(e.x - x, e.y - y) > 64);
   const lift = carry?.elevator && elevators.reduce((a, l) => !a || Math.abs(l.x - carry.elevator.x) < Math.abs(a.x - carry.elevator.x) ? l : a, null);
   if (lift) { carry.x = lift.to.x; carry.y = lift.to.y; }
   const at = carry ? nearestFree(sol, box, carry.x, carry.y)
-    : nearestFree(sol, box, spawn ? spawn.x : bossEnter ? bossEnter.x : room.w >> 1, spawn ? spawn.y : bossEnter ? bossEnter.y : room.h >> 1, clear);
+    : nearestFree(sol, box, from ? from.x : room.w >> 1, from ? from.y : room.h >> 1, clear);
   const p = { x: at.x, y: at.y, hs: 0, vs: 0, aim: 0, dir: 0, frame: 0, sprite: P.walk, attack: null, attackFrame: 0, cooldown: 0, weapon: null, exec: null,
     ammo: 0, barrel: -1, dead: null, roll: null, rollCool: 0, spread: false, flash: 0, punch: 0 };
   if (carry && arm[carry.weapon]) { p.weapon = carry.weapon; p.ammo = carry.ammo; p.sprite = arm[carry.weapon].walk; }
   else if (!carry && arm.Special) { p.weapon = 'Special'; p.ammo = arm.Special.ammo; p.sprite = arm.Special.walk; }
+  else if (!carry && fan?.start) {
+    const w = fan.start.find(w => arm[w]);
+    if (w) { p.weapon = w; p.ammo = arm[w].ammo; p.sprite = arm[w].walk; }
+  }
   // The exit the player arrives on stays off until they step off it.
   for (const x of exits) x.off = overlap(p, box, x, x.box);
   for (const l of elevators) l.used = overlap(p, box, l, l.box);
@@ -967,7 +991,7 @@ export async function play(env) {
   // scrThrow: the held weapon leaves along the aim.
   function throwWeapon() {
     sfx(SOUND.throw);
-    weapons.push({ name: p.weapon, x: p.x, y: p.y, angle: aimDeg(), dir: aimDeg(), speed: WEAPON.throwSpeed, ammo: p.ammo, sprite: looseSprite[p.weapon] });
+    weapons.push({ name: p.weapon, x: p.x, y: p.y, angle: aimDeg(), dir: aimDeg(), speed: WEAPON.throwSpeed, ammo: p.ammo, sprite: looseSprite[p.weapon], thrown: true });
     p.weapon = null;
     p.ammo = 0;
   }
@@ -1043,7 +1067,10 @@ export async function play(env) {
     if (!mx && lenX(w.speed, w.dir)) { w.dir = (540 - w.dir) % 360; w.speed *= WEAPON.bounce; }
     if (!my && lenY(w.speed, w.dir)) { w.dir = (360 - w.dir) % 360; w.speed *= WEAPON.bounce; }
     for (const e of [...enemies])
-      if (w.speed >= WEAPON.hitSpeed && overlap(w, wbox, e, e.box)) { knockOut(e, w.dir, SOUND.thrown); w.speed *= WEAPON.hitDamp; }
+      if (w.speed >= WEAPON.hitSpeed && overlap(w, wbox, e, e.box)) {
+        if (fan?.lethalThrow && w.thrown) shoot(e, w.dir, false, e.spr.deadBlunt); else knockOut(e, w.dir, SOUND.thrown);
+        w.speed *= WEAPON.hitDamp;
+      }
     const hs = lenX(w.speed, w.dir), vs = lenY(w.speed, w.dir);
     w.angle += Math.sign(Math.abs(hs) > 0.001 ? hs : vs) * w.speed * WEAPON.spin;
     w.speed = Math.max(0, w.speed - WEAPON.friction);
@@ -1102,6 +1129,7 @@ export async function play(env) {
           p.attackFrame = a.startFrame || 0; p.cooldown = a.cooldown;
           p.attack = { frames: frames(p.sprite), gun: true, imageSpeed: a.imageSpeed };
           fire(p, aimDeg(), a, true, a.side !== undefined ? p.barrel : 0);
+          if (fan?.doubleFire) fire(p, aimDeg() + 3, a, true, a.side !== undefined ? -p.barrel : 0);
         }
       } else {
         const punch = P.punches[p.punch++ % (P.punches.length || 1)];
@@ -1356,7 +1384,7 @@ export async function play(env) {
   }
   function leave(lift) {
     handle.stop();
-    const carried = { x: p.x, y: p.y, weapon: p.weapon, ammo: p.ammo, elevator: lift && { x: lift.x }, stats, character: fan && pobj.name };
+    const carried = { x: p.x, y: p.y, weapon: p.weapon, ammo: p.ammo, elevator: lift && { x: lift.x }, stats, character: fan && (pick.startsWith(pobj.name + ':') ? pick : pobj.name) };
     if (!env.next || !env.next(room, carried)) env.status(`${room.name} cleared: this is the last room in order.`);
   }
 

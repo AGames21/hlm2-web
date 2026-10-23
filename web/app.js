@@ -6,7 +6,7 @@ import * as T from './tables.js';
 import { play, musicFor } from './game.js';
 import { Audio, RemoteFile } from './audio.js';
 import { scoreScreen } from './score.js';
-import { frontEnd, card, maskMenu, abortMenu, STORY, progress, options } from './menu.js';
+import { frontEnd, card, maskMenu, PICKER_OBJECTS, abortMenu, STORY, progress, options } from './menu.js';
 import { YouTubePlayer, youtubeTrack } from './youtube.js';
 import { SOUNDTRACK, SOUNDTRACK_MIX, SceneSoundtrack, trackLabel, trackSearch } from './soundtrack.js';
 import { drawRoomItems } from './render.js';
@@ -202,7 +202,8 @@ function stopPlay() {
 }
 
 // carry: what the player brings from the floor before (position, weapon, ammo).
-// character: the Fans' mask, picked on a room with objMaskMenu and kept on a restart.
+// character: the Fans' mask, Jake's mask or the Son's style, picked on a room with
+// objMaskMenu, objCobraMaskMenu or objSonStyleMenu and kept on a restart and floor change.
 async function startPlay(name = $('room').value, carry = null, track, character = carry?.character) {
   stopPlay();
   const request = menuToken;
@@ -210,8 +211,9 @@ async function startPlay(name = $('room').value, carry = null, track, character 
   if (!room) return false;
   const { items, imgs, levelAtlas } = await roomItems(room, false);
   if (request !== menuToken) return false;
-  if (!character && room.insts.some(i => G.objects.get(i.obj)?.name === 'objMaskMenu')) {
-    character = await maskMenu(G, $('canvas'), zoomNow());
+  const picker = room.insts.map(i => G.objects.get(i.obj)?.name).find(n => PICKER_OBJECTS.includes(n));
+  if (!character && picker) {
+    character = await maskMenu(G, $('canvas'), zoomNow(), picker);
     if (request !== menuToken || typeof character !== 'string') {
       if (character === null) status('No mask picked.');
       return false;

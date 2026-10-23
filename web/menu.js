@@ -485,13 +485,34 @@ export const MASKS = [
   { name: 'ALEX & ASH', obj: 'objPlayerSwanChainsaw', frame: 2, note: 'CHAINSAW' },
   { name: 'MARK', obj: 'objPlayerBear', frame: 3, note: 'DUAL MP5S, RIGHT CLICK SPREADS' },
 ];
-let lastMask = 0;
-export async function maskMenu(G, canvas, zoom) {
+// objCobraMaskMenu (Jake, Hard News and Withdrawal): create 0x654060 names
+// the masks JAKE, IRVIN, DALLAS and their notes from string ids 3051, 3052
+// and 3053 + ", " + 3054; sprCobraMasksBig frames 0..2. objSonStyleMenu (the
+// Son, Seizure and Take Over): create 0xb94470 takes the names from ids
+// 3059..3061 and the notes from 3056, 3054 + ", " + 3055 and 3062;
+// sprSonWeapons frames 0..2. Both share the keypress handlers 0x655570 and
+// 0x655860 (A/D, selection 0..2 wrapping, skipping locked ones). The pick is
+// passed on as '<player object>:<index>' (game.js FANS). Text comes from the
+// player's own localization at runtime.
+const PICKERS = {
+  objMaskMenu: { title: 'CHOOSE YOUR MASK', sprite: 'sprMasksBig', slot: 130, scale: [0.9, 0.55], list: () => MASKS },
+  objCobraMaskMenu: { title: 'CHOOSE YOUR MASK', sprite: 'sprCobraMasksBig', slot: 110, scale: [1.2, 0.7], list: G => [
+    { name: 'JAKE', note: [3051] }, { name: 'IRVIN', note: [3052] }, { name: 'DALLAS', note: [3053, 3054] },
+  ].map((m, i) => ({ ...m, obj: 'objPlayerCobra:' + i, frame: i, note: noteText(G, m.note) })) },
+  objSonStyleMenu: { title: 'CHOOSE YOUR STYLE', sprite: 'sprSonWeapons', slot: 120, scale: [1.4, 0.8], list: G => [
+    { name: 3059, note: [3056] }, { name: 3060, note: [3054, 3055] }, { name: 3061, note: [3062] },
+  ].map((m, i) => ({ obj: 'objSon:' + i, frame: i, name: (G.text?.[m.name] || 'STYLE ' + (i + 1)).toUpperCase(), note: noteText(G, m.note) })) },
+};
+const noteText = (G, ids) => ids.map(id => G.text?.[id] || '').filter(Boolean).join(', ').toUpperCase();
+export const PICKER_OBJECTS = Object.keys(PICKERS);
+const lastPick = {};
+export async function maskMenu(G, canvas, zoom, kind = 'objMaskMenu') {
+  const k = PICKERS[kind] || PICKERS.objMaskMenu, list = k.list(G);
   const cx = setup(canvas, zoom);
   const [big, small] = await Promise.all(['fntChapter', 'fntScoreSmall'].map(n => loadFont(G, n)));
-  const sp = await sprites(G, ['sprMasksBig', 'sprScanlines', 'sprNoise']);
-  let sel = lastMask, slide = -700;
-  const n = MASKS.length, slot = 130;
+  const sp = await sprites(G, [k.sprite, 'sprScanlines', 'sprNoise']);
+  let sel = lastPick[kind] || 0, slide = -700;
+  const n = list.length, slot = k.slot;
   return loop(canvas, (t, ev) => {
     for (const e of ev) {
       if (e.k === 'left' || e.k === 'up') sel = (sel + n - 1) % n;
@@ -501,7 +522,7 @@ export async function maskMenu(G, canvas, zoom) {
         const i = Math.round((e.x - W / 2) / slot);
         if (i) { sel = (sel + n + Math.sign(i)) % n; continue; }
       }
-      if ((e.k === 'ok' || e.k === 'click') && t > 10) { lastMask = sel; return MASKS[sel].obj; }
+      if ((e.k === 'ok' || e.k === 'click') && t > 10) { lastPick[kind] = sel; return list[sel].obj; }
       if (e.k === 'back') return null;
     }
     slide = Math.min(0, slide + Math.max(4, -slide * 0.15));
@@ -510,18 +531,19 @@ export async function maskMenu(G, canvas, zoom) {
     g.addColorStop(0, '#12051f'); g.addColorStop(1, css(merge([60, 0, 50], [140, 20, 60], wave(1, tt))));
     cx.fillStyle = g;
     cx.fillRect(0, 0, W, H);
-    drawText(cx, small, 'CHOOSE YOUR MASK', W / 2, 16, { align: 0.5, colour: '#fff' });
-    for (let d = -2; d <= 2; d++) {
-      const m = MASKS[(sel + d + n * 2) % n], x = W / 2 + d * slot + slide;
+    drawText(cx, small, k.title, W / 2, 16, { align: 0.5, colour: '#fff' });
+    const side = n > 3 ? 2 : 1;
+    for (let d = -side; d <= side; d++) {
+      const m = list[(sel + d + n * 2) % n], x = W / 2 + d * slot + slide;
       cx.globalAlpha = d ? 0.35 : 1;
-      blit(cx, sp.sprMasksBig, m.frame, x, H / 2 - 22 + (d ? 0 : Math.sin(tt * 3) * 3), { centre: true, scale: d ? 0.55 : 0.9 });
+      blit(cx, sp[k.sprite], m.frame, x, H / 2 - 22 + (d ? 0 : Math.sin(tt * 3) * 3), { centre: true, scale: k.scale[d ? 1 : 0] });
     }
     cx.globalAlpha = 1;
-    const m = MASKS[sel];
+    const m = list[sel];
     const sc = Math.min(0.55, (W - 30) / textWidth(big, m.name));
     for (const [d, c] of [[3, '#000'], [0, css(merge(C.fuchsia, C.yellow, wave(2, tt)))]])
       drawText(cx, big, m.name, W / 2 + d, H - 92 + d, { align: 0.5, colour: c, scale: sc });
-    drawText(cx, small, m.note, W / 2, H - 28, { align: 0.5, colour: '#c8b8ff', scale: 0.8 });
+    drawText(cx, small, m.note, W / 2, H - 28, { align: 0.5, colour: '#c8b8ff', scale: Math.min(0.8, (W - 20) / Math.max(1, textWidth(small, m.note))) });
     tile(cx, sp.sprScanlines, 0.2);
     tile(cx, sp.sprNoise, 0.05, (t * 37) % 160, (t * 53) % 160);
   });
