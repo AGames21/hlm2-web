@@ -227,6 +227,7 @@ async function startPlay(name = $('room').value, carry = null, track, character 
     cancelled: () => request !== menuToken,
     paused: () => $('settings-dialog').open,
     restart: () => startPlay(room.name, carry, track, character), next: nextFloor,
+    exitDone: inst => { const link = HUB.levels.includes(levelOf(room.name)) && hubLink(room, inst); return !!link && done(link.room, carry); },
     // The story's intro room hands over to the level once its talk is over.
     talkDone: () => { if (story?.intro && request === menuToken) setTimeout(() => request === menuToken && story.intro && startLevel(), 600); } };
   $('canvas').hidden = false;

@@ -175,7 +175,9 @@ export const BULLET = { margin: 100 };
 // sndHit together on a blow; here both play once as the execution starts.
 // objLevelCleared's create (0x8b2d10) plays sndLevelComplete.
 export const SOUND = { exec: 'sndHit', execThud: 'sndPunch', levelComplete: 'sndLevelComplete', swing: ['sndSwing1', 'sndSwing2'], punch: 'sndPunch', hit: 'sndHit', thrown: 'sndWeaponHit',
-  door: 'sndDoorHit', doorOpen: 'sndDoorOpen', pickup: 'sndPickUpWeapon', throw: 'sndThrow', cleared: 'sndFloorCleared' };
+  door: 'sndDoorHit', doorOpen: 'sndDoorOpen', pickup: 'sndPickUpWeapon',
+  // The pickup (0x11d30f0) plays sndDrawKnife on its blade branches; which weapons take them is a guess.
+  drawKnife: 'sndDrawKnife', blades: /^(Knife|Machete|Machette|Sword|Shard)$/, throw: 'sndThrow', cleared: 'sndFloorCleared' };
 // Level music: the scene setters 0x8d6f00 (normal) and 0x11c5bf0 (hard) give
 // each scene its first room and track ("\Name.mp3", played from
 // Music/Name.ogg). Their second branch, the story start with its cutscene
@@ -383,7 +385,9 @@ export const HIDE = { every: 8, first: 10, rise: 0.25, up: 4, ammo: 24, reload: 
 // 0.1, at least 0.3 while running. Any knockout kills a dog. The calm patrol
 // (var 31 = 0) is taken to be the mafia's wander; re-checking every 10 steps
 // is a reading of the create.
-export const DOG = { recheck: 10, speed: 4, kill: 22, imageSpeed: 0.1, runImage: 0.3 };
+// The step plays sndDogBark (0xe0315b) as the dog takes up the chase (state
+// 2); the kill (0x1123ee0) plays sndDogRip. Here the bark is on first sight.
+export const DOG = { recheck: 10, speed: 4, kill: 22, imageSpeed: 0.1, runImage: 0.3, bark: 'sndDogBark', rip: 'sndDogRip' };
 // Exits: objNextroom (124, step 0x939c70, player collision 0x937ad0, room
 // start 0x939700). An exit is live while no objEnemy and no objKnockedOut is
 // left; then it shows its arrow and touching it goes to the next room in the
@@ -562,14 +566,16 @@ function gridPath(pg, x0, y0, x1, y1) {
   return pts.reverse();
 }
 
-// place_free for the player's box at (x, y). The room edge blocks too, until
-// the exits (objEditorNextRoom and friends) are handled.
+// place_free for the player's box at (x, y). Outside the room is free in
+// GameMaker (the 24px strip under rmSonMansionFloor1's stair rails is only
+// passable past the bottom edge), so the box may stick out `ROOM_EDGE` px.
+export const ROOM_EDGE = 16;
 function free(sol, box, x, y) {
   const l = Math.round(x) + box.l, t = Math.round(y) + box.t;
-  const r = l + box.r - box.l, b = t + box.b - box.t;
-  if (l < 0 || t < 0 || r >= sol.w || b >= sol.h) return false;
-  for (let yy = t; yy <= b; yy++)
-    for (let xx = l; xx <= r; xx++)
+  const r = l + box.r - box.l, b = t + box.b - box.t, E = ROOM_EDGE;
+  if (l < -E || t < -E || r >= sol.w + E || b >= sol.h + E) return false;
+  for (let yy = Math.max(t, 0); yy <= Math.min(b, sol.h - 1); yy++)
+    for (let xx = Math.max(l, 0); xx <= Math.min(r, sol.w - 1); xx++)
       if (sol.grid[yy * sol.w + xx]) return false;
   return true;
 }
@@ -827,11 +833,13 @@ export async function play(env) {
 
   const arrow = need('sprArrow');
   const splatSprites = BLOOD.splats.map(need).filter(Boolean), poolSprites = BLOOD.pool.map(need).filter(Boolean);
+  // An exit back to a hub room already cleared (env.exitDone, from app.js) shows sprGreyArrow.
+  const greyArrow = need('sprGreyArrow') || arrow;
   const exits = room.insts.filter(i => EXIT.objects.includes(G.objects.get(i.obj)?.name) && G.objects.get(i.obj).sprite >= 0).map(i => {
-    const o = G.objects.get(i.obj);
+    const o = G.objects.get(i.obj), grey = !!env.exitDone?.(i);
     const edges = [room.w - i.x, i.y, i.x, room.h - i.y];
-    return { inst: i, kind: o.name, x: i.x, y: i.y, box: maskBox(G, o), off: false, live: false,
-      sprite: o.name === 'objNextroom' ? arrow : need(G.sprites.get(o.sprite).name), frame: edges.indexOf(Math.min(...edges)) };
+    return { inst: i, kind: o.name, x: i.x, y: i.y, box: maskBox(G, o), off: false, live: false, grey,
+      sprite: o.name === 'objNextroom' ? grey ? greyArrow : arrow : need(G.sprites.get(o.sprite).name), frame: edges.indexOf(Math.min(...edges)) };
   });
   const starts = room.insts.filter(i => G.objects.get(i.obj)?.name === START_POINT.object).sort((a, b) => a.id - b.id);
   const near = (a, b) => Math.hypot(a.x - spawn.x, a.y - spawn.y) - Math.hypot(b.x - spawn.x, b.y - spawn.y);
@@ -1182,7 +1190,7 @@ export async function play(env) {
     if (w) {
       if (p.weapon) throwWeapon();
       weapons.splice(weapons.indexOf(w), 1);
-      sfx(SOUND.pickup);
+      sfx(SOUND.blades.test(w.name) ? SOUND.drawKnife : SOUND.pickup);
       const disarm = P.disarm?.[w.name];
       if (disarm) {
         p.sprite = disarm; p.attackFrame = 0;
@@ -1372,7 +1380,7 @@ export async function play(env) {
       e.check = e.dog ? DOG.recheck : ENEMY.recheck;
       // The first shot waits one re-check (a guess at the reaction time).
       if (!p.dead && sees(e, p)) {
-        if (!e.alert) e.wait = ENEMY.recheck;
+        if (!e.alert) { e.wait = ENEMY.recheck; if (e.dog) sfx(DOG.bark); }
         e.alert = true; e.seen = { x: p.x, y: p.y };
       }
     }
@@ -1435,7 +1443,7 @@ export async function play(env) {
         }
         if (!g && see && d < (e.dog ? DOG.kill : ENEMY.melee)) {
           if (e.spr.attack && e.sprite !== e.spr.attack) { e.sprite = e.spr.attack; e.frame = 0; }
-          if (!p.dead && !p.exec) sfx(e.dog ? SOUND.punch : SOUND.hit);
+          if (!p.dead && !p.exec) sfx(e.dog ? DOG.rip : SOUND.hit);
           killPlayer(P.deadBlunt, e.angle);
         }
       }
@@ -1611,6 +1619,7 @@ export async function play(env) {
   function leave(lift, exit) {
     handle.stop();
     handle.left = true;
+    handle.via = exit ? `${exit.kind} ${exit.x},${exit.y}` : lift ? 'elevator' : 'end';
     const carried = { x: p.x, y: p.y, weapon: p.weapon, ammo: p.ammo, elevator: lift && { x: lift.x }, stats, character: pick.startsWith(pobj.name + ':') ? pick : pobj.name,
       exit: exit?.kind === 'objNextroom' && { x: exit.inst.x, y: exit.inst.y },
       level: { rooms: { ...carry?.level?.rooms, [room.name]: { dead, weapons: weapons.map(w => ({ ...w, inst: null, speed: 0 })) } } } };

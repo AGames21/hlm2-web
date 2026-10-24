@@ -33,9 +33,9 @@ function installBot() {
     B.newBug = true;
   };
   const free = (sol, box, x, y) => {
-    const l = Math.round(x) + box.l, t = Math.round(y) + box.t, r = l + box.r - box.l, b = t + box.b - box.t;
-    if (l < 0 || t < 0 || r >= sol.w || b >= sol.h) return false;
-    for (let yy = t; yy <= b; yy++) for (let xx = l; xx <= r; xx++) if (sol.grid[yy * sol.w + xx]) return false;
+    const l = Math.round(x) + box.l, t = Math.round(y) + box.t, r = l + box.r - box.l, b = t + box.b - box.t, E = 16; // game.js ROOM_EDGE
+    if (l < -E || t < -E || r >= sol.w + E || b >= sol.h + E) return false;
+    for (let yy = Math.max(t, 0); yy <= Math.min(b, sol.h - 1); yy++) for (let xx = Math.max(l, 0); xx <= Math.min(r, sol.w - 1); xx++) if (sol.grid[yy * sol.w + xx]) return false;
     return true;
   };
   const clearLine = (sol, a, b) => {
@@ -99,7 +99,15 @@ function installBot() {
     const p = g.player;
     if (!p.sceneHidden && !free(g.solids, g.box, p.x, p.y)) bug('spawn in wall', `${Math.round(p.x)},${Math.round(p.y)}`);
     if (p.sprite && !B.art.has(p.sprite)) bug('player sprite not loaded', p.sprite);
-    const start = cellOf(B.nav, p.x, p.y), f = flood(B.nav, start);
+    B.cur.at = `${Math.round(p.x)},${Math.round(p.y)}`;
+    B.reachDue = true;
+    if (!p.sceneHidden) reach(g, d);
+  }
+  // Enemies and exits the player cannot walk to, checked once the player is in the room
+  // (a car arrival hides the player off the map first).
+  function reach(g, d = g.diagnostics()) {
+    B.reachDue = false;
+    const p = g.player, start = cellOf(B.nav, p.x, p.y), f = flood(B.nav, start);
     for (const t of d.targets) {
       if (t.sprite && !B.art.has(t.sprite)) bug('enemy sprite not loaded', `${t.kind} ${t.sprite}`);
       const c = cellOf(B.nav, t.x, t.y);
@@ -139,7 +147,9 @@ function installBot() {
         }
         if (best) { add(used[0], 'step off elevator', best.x, best.y); return cands[0]; }
       }
-      const live = g.exits.filter(x => x.live);
+      // Skip exits back to cleared hub rooms unless they are the only way on.
+      const all = g.exits.filter(x => x.live), fresh = all.filter(x => !x.grey);
+      const live = fresh.length ? fresh : all;
       for (const x of live) add(x, 'exit', x.x + ((x.box?.l ?? 0) + (x.box?.r ?? 0)) / 2, x.y + ((x.box?.t ?? 0) + (x.box?.b ?? 0)) / 2);
       for (const l of g.elevators) add(l, 'elevator', l.x + ((l.box?.l ?? 0) + (l.box?.r ?? 0)) / 2, l.y + ((l.box?.t ?? 0) + (l.box?.b ?? 0)) / 2);
     }
@@ -218,6 +228,7 @@ function installBot() {
     const p = g.player, sol = g.solids, cur = B.cur;
     if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) bug('player position not a number', `${p.x},${p.y}`);
     const busy = p.exec || p.ride || p.dead || p.sceneHidden;
+    if (B.reachDue && !p.sceneHidden) reach(g);
     if (!busy && !free(sol, g.box, p.x, p.y)) bug('player inside a wall', `${Math.round(p.x)},${Math.round(p.y)} sprite ${p.sprite}`);
     if (!p.sceneHidden && p.sprite && !B.art.has(p.sprite)) bug('player sprite not loaded (invisible)', p.sprite);
     if (B.prev) {
@@ -272,7 +283,7 @@ function installBot() {
       if (window.game === g && !g.left) check(g);
       if (i % 4 === 0) try { g.draw(); } catch (e) { bug('draw threw', e.message); }
     }
-    if (g.left) B.cur.outcome = 'left';
+    if (g.left) { B.cur.outcome = 'left'; B.cur.via = g.via; }
     const p = g.player;
     return { mode: 'playing', room: g.room, steps: B.cur.steps, newBug: B.newBug, enemies: g.enemies.length, kos: g.kos.length, x: Math.round(p.x), y: Math.round(p.y), dead: !!p.dead };
   };
