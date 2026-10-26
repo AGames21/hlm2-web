@@ -506,7 +506,7 @@ export const CAMERA = { lead: 0.5, max: 22, ease: 0.15 };
 export const NIGHT = {
   room: /^rmTutorialFloor1$/, top: [44, 0, 0], bottom: [16, 0, 0], tint: 'rgb(222,204,189)',
   glow: { r: 110, colour: [120, 40, 40], a: 0.35 },
-  hint: { text: 0, door: 1, near: 96, font: 'fntLabel', scale: 1.15, track: 0, padX: 7, top: 245, h: 14, box: '#000', shadow: 'rgb(3,124,124)', a: [255, 135, 255], b: [255, 240, 255], flash: 12, exec: 2, look: 3 },
+  hint: { text: 0, door: 1, near: 96, font: 'fntLabel', scale: 1.15, track: 0, padX: 7, top: 245, h: 14, box: '#000', shadow: 'rgb(3,124,124)', a: [255, 135, 255], b: [255, 240, 255], flash: 12, pop: 18, popScale: 0.09, exec: 2, look: 3, swing: 5, throw: 6, swap: 120, pickup: 4, pickupNear: 48, pickupWeapon: 'Hammer' },
 };
 export const EXEC = { scale: 2, imageSpeed: 0.25, hammerShift: 4 };
 
@@ -2087,19 +2087,29 @@ export async function play(env) {
     const atDoor = doors.some(d => Math.hypot(d.x - p.x, d.y - p.y) < h.near);
     // Native order: walk (door hint near a door), execute while someone is knocked out, then look around after the first execute.
     if (!hint.stage && kos.length) hint.stage = 1;
-    const id = hint.stage === 2 ? h.look : hint.stage === 1 && kos.length ? h.exec : atDoor && G.text[h.door] ? h.door : h.text;
+    // Holding a melee weapon beats all of that: throw, then swing, swapping every 2 seconds.
+    const melee = held() && !held().gun;
+    if (!melee) hint.held = null; else if (hint.held == null) hint.held = frameClock;
+    // The pick-up line names the hammer, so it shows near a loose hammer once no one is left knocked out.
+    // GUESS: the 48px range (native showed it a little outside pickup reach).
+    const nearPickup = weapons.some(w => w.name === h.pickupWeapon && w.speed === 0 && Math.hypot(w.x - p.x, w.y - p.y) < h.pickupNear);
+    const id = melee ? ((frameClock - hint.held) / h.swap & 1 ? h.swing : h.throw)
+      : kos.length && hint.stage === 1 ? h.exec : nearPickup ? h.pickup
+      : hint.stage === 2 ? h.look : atDoor && G.text[h.door] ? h.door : h.text;
     const chars = [...G.text[id]];
     // native flashes the box red, with white text, for a moment whenever the hint changes
-    if (hint.id !== id) { hint.id = id; hint.flash = h.flash; }
+    // and pops the text up a little bigger, shrinking back over 0.3 seconds
+    if (hint.id !== id) { hint.id = id; hint.flash = h.flash; hint.pop = h.pop; }
     const fl = hint.flash > 0 ? hint.flash-- / h.flash : 0;
-    const w = chars.reduce((n, ch) => n + textWidth(f, ch) * h.scale + h.track, -h.track);
+    const sc = h.scale * (1 + (hint.pop > 0 ? hint.pop-- / h.pop : 0) * h.popScale);
+    const w = chars.reduce((n, ch) => n + textWidth(f, ch) * sc + h.track, -h.track);
     const k = (1 - Math.cos(frameClock / 20)) / 2, col = `rgb(${h.a.map((v, i) => Math.round(v + (h.b[i] - v) * k))})`;
     const x0 = Math.round(VIEW_W / 2 - w / 2), y = h.top + Math.round((h.h - (f.base || 8) * h.scale) / 2);
     cx.save();
     cx.fillStyle = fl ? `rgb(${Math.round(191 * fl)},0,0)` : h.box; cx.fillRect(x0 - h.padX, h.top, Math.round(w) + h.padX * 2, h.h);
     for (const [colour, d] of [[h.shadow, 1], [fl ? '#fff' : col, 0]]) {
       let x = x0 + d;
-      for (const ch of chars) { drawText(cx, f, ch, x, y + d, { colour, scale: h.scale }); x += textWidth(f, ch) * h.scale + h.track; }
+      for (const ch of chars) { drawText(cx, f, ch, x, y + d, { colour, scale: sc }); x += textWidth(f, ch) * sc + h.track; }
     }
     cx.restore();
   }
