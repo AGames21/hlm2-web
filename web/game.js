@@ -512,6 +512,10 @@ export const NIGHT = {
   glow: { r: 110, colour: [120, 40, 40], a: 0.35 },
   hint: { text: 0, door: 1, near: 96, font: 'fntLabel', scale: 1.15, track: 0, padX: 7, top: 245, h: 14, box: '#000', shadow: 'rgb(3,124,124)', a: [255, 135, 255], b: [255, 240, 255], flash: 12, pop: 18, popScale: 0.09, exec: 2, look: 3, swing: 5, throw: 6, swap: 120, pickup: 4, pickupNear: 48, pickupWeapon: 'Hammer' },
 };
+// The death prompt (text 3050, its [R] shown as R), measured off the native Pilot:
+// a black box left of centre just above the hint, the text fading cyan to magenta.
+// GUESS: the same spot in rooms with no hint, and the fade's speed.
+export const RESTART = { text: 3050, key: /\[R\]/, font: 'fntLabel', scale: 1.38, x: 65, top: 224, h: 21, padX: 9, a: [0, 220, 217], b: [230, 0, 214], shadow: 'rgb(120,8,3)', period: 20 };
 export const EXEC = { scale: 2, imageSpeed: 0.25, hammerShift: 4 };
 
 
@@ -1116,6 +1120,7 @@ export async function play(env) {
   const cam = { x: 0, y: 0, shake: 0 };
   const night = NIGHT.room.test(room.name);
   const hint = night && G.text?.[NIGHT.hint.text] ? { font: await loadFont(G, NIGHT.hint.font) } : null;
+  const restartFont = G.text?.[RESTART.text] ? await loadFont(G, RESTART.font) : null;
   const onKey = (e) => {
     if (env.paused?.()) return;
     if (e.type === 'keydown' && (e.target.closest?.('input, select, textarea, button') || e.target.isContentEditable)) return;
@@ -2120,7 +2125,18 @@ export async function play(env) {
     }
     cx.restore();
   }
+  function drawRestart() {
+    const R = RESTART, f = restartFont, text = String(G.text[R.text]).replace(R.key, 'R');
+    const w = Math.round(textWidth(f, text) * R.scale), y = R.top + Math.round((R.h - (f.base || 8) * R.scale) / 2);
+    const k = (1 - Math.cos(frameClock / R.period)) / 2, col = `rgb(${R.a.map((v, i) => Math.round(v + (R.b[i] - v) * k))})`;
+    cx.save();
+    cx.fillStyle = '#000'; cx.fillRect(R.x - R.padX, R.top, w + R.padX * 2, R.h);
+    drawText(cx, f, text, R.x + 1, y + 1, { colour: R.shadow, scale: R.scale });
+    drawText(cx, f, text, R.x, y, { colour: col, scale: R.scale });
+    cx.restore();
+  }
   function hud() {
+    if (p.dead && restartFont && env.restart) drawRestart();
     if (night) { if (hint) drawHint(); return; }
     cx.save();
     cx.font = 'bold 10px monospace';
