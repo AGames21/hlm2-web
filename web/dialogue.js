@@ -63,7 +63,9 @@ export function conversation(G, pages, { drawFace, onEnd, fonts = {} } = {}) {
       held = s.mouse.rightHeld ? held + 1 : 0;
       if (held >= TALK.skip.hold) { closing = true; return true; }
       const cur = boxes[i];
-      if (shown < cur.len) { shown = Math.min(cur.len, shown + TALK.typeSpeed); faceFrame += TALK.faceSpeed; }
+      // native keeps the portrait animating after the box is fully typed
+      faceFrame += TALK.faceSpeed;
+      if (shown < cur.len) shown = Math.min(cur.len, shown + TALK.typeSpeed);
       if (press(s)) {
         if (shown < cur.len) shown = cur.len;
         else if (++i < boxes.length) shown = 0;
@@ -97,7 +99,7 @@ export function conversation(G, pages, { drawFace, onEnd, fonts = {} } = {}) {
           cx.beginPath();
           cx.moveTo(P.x0, top + 1); cx.lineTo(W, top + 1); cx.lineTo(W, bottom - 1); cx.lineTo(P.x1, bottom - 1); cx.closePath();
           cx.clip();
-          drawFace(cx, cur.face, shown < cur.len ? faceFrame : 0, W - TALK.faceRight, TALK.faceTop, 0);
+          drawFace(cx, cur.face, faceFrame, W - TALK.faceRight, TALK.faceTop, 0);
           cx.restore();
         }
         if (skipText && fonts.skip) drawText(cx, fonts.skip, skipText, TALK.skip.x, TALK.skip.y, { colour: TALK.skip.colour });

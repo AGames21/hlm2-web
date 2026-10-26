@@ -57,8 +57,9 @@ export const COUPLE = { obj: 'objVictim45Idle', imageSpeed: 0.15, near: 96, idle
 // rmTutorialFloor2MovieSet: the "CUT!" scene. The room sits above the film
 // set; objDirector (416,-144) walks down into it while the camera follows,
 // then the camera settles on the set and the rest of the talk plays. The Pig is not seen.
-// Speed, stop row and set centre are read off play footage, not the code.
-export const FILM_SET = { obj: 'objDirector', walk: 'sprDirectorWalk', speed: 1, imageSpeed: 0.2, stopY: 104, centre: [440, 144], ease: 0.04, after: 30,
+// Speed, stop row and set centre are read off play footage, not the code
+// (centre re-measured against the native game on 2026-10-26).
+export const FILM_SET = { obj: 'objDirector', walk: 'sprDirectorWalk', speed: 1, imageSpeed: 0.2, stopY: 104, centre: [476, 160], ease: 0.04, after: 30,
   // GUESS: frames from his stop to the second talk (native pans first, about 1.5 s).
   panWait: 90 };
 // The rooms left at GameMaker's default colour (0xC0C0C0) have no backdrop
