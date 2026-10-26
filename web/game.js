@@ -56,9 +56,11 @@ export const COUPLE = { obj: 'objVictim45Idle', imageSpeed: 0.15, near: 96, idle
   split: [['objVictim4', -12], ['objVictim5', 12]], cut: 170, fade: 50, glow: 90 };
 // rmTutorialFloor2MovieSet: the "CUT!" scene. The room sits above the film
 // set; objDirector (416,-144) walks down into it while the camera follows,
-// then the camera settles on the set and the talk plays. The Pig is not seen.
+// then the camera settles on the set and the rest of the talk plays. The Pig is not seen.
 // Speed, stop row and set centre are read off play footage, not the code.
-export const FILM_SET = { obj: 'objDirector', walk: 'sprDirectorWalk', speed: 1, imageSpeed: 0.2, stopY: 104, centre: [440, 144], ease: 0.04, after: 30 };
+export const FILM_SET = { obj: 'objDirector', walk: 'sprDirectorWalk', speed: 1, imageSpeed: 0.2, stopY: 104, centre: [440, 144], ease: 0.04, after: 30,
+  // GUESS: frames from his stop to the second talk (native pans first, about 1.5 s).
+  panWait: 90 };
 // The rooms left at GameMaker's default colour (0xC0C0C0) have no backdrop
 // object; the game shows a slow purple and teal wash there instead (footage).
 // How far from its car the player starts (a guess from footage).
@@ -1002,7 +1004,9 @@ export async function play(env) {
   const sonScene = bosses.some(b => b.kind === 'objBoss' || b.kind === 'objColombianBoss');
   const directorInst = room.insts.find(i => G.objects.get(i.obj)?.name === FILM_SET.obj);
   const film = directorInst && { inst: directorInst, x: directorInst.x, y: directorInst.y, frame: 0, sprite: need(FILM_SET.walk), arrived: false, wait: 0 };
-  const talks = (sonScene ? [] : TALKS[room.id] || []).map((pages, k) => {
+  // The film set's talk is two pages played apart: one during the walk, one on the set.
+  const talkList = sonScene ? [] : film ? (TALKS[room.id] || []).flat().map(pg => [pg]) : TALKS[room.id] || [];
+  const talks = talkList.map((pages, k) => {
     for (const [face] of pages) if (face) need(face);
     const near = talkers.filter(t => G.objects.get(t.obj).sprite >= 0);
     return { pages, at: script && k === 0 || !near.length ? null : near };
@@ -1027,7 +1031,10 @@ export async function play(env) {
   const drawFace = (c, name, frame, x, y, h) => {
     const a = art.get(name);
     if (!a) return 0;
-    const f = a.hit.frames[Math.floor(frame) % a.hit.frames.length], k = Math.min(1, h / f.h);
+    const f = a.hit.frames[Math.floor(frame) % a.hit.frames.length];
+    // h 0: the talk screen's big portrait, right edge on x (the talk screen's portrait panel)
+    if (!h) { const z = TALK.faceScale; c.drawImage(imgs.get(a.hit.atlas), f.x, f.y, f.w, f.h, x - f.w * z, y, f.w * z, f.h * z); return f.w * z; }
+    const k = Math.min(1, h / f.h);
     c.drawImage(imgs.get(a.hit.atlas), f.x, f.y, f.w, f.h, x, y + (h - f.h * k) / 2, Math.round(f.w * k), Math.round(f.h * k));
     return Math.round(f.w * k);
   };
@@ -1036,13 +1043,16 @@ export async function play(env) {
     if (env.cutscene && !env.cutscene.done || p.dead) return;
     if (!talks.length) { if (env.cutscene) { env.cutscene = null; env.talkDone?.(); } return; }
     const t = talks[0];
-    if (film && !film.arrived) return;
+    // Native: the first talk plays while the director is still walking down; the
+    // next waits for him to stop and the camera to pan over to the set.
+    if (film && (film.arrived ? talkClock < FILM_SET.panWait : film.talked)) return;
     if (talkClock < TALK.startDelay || t.at && !t.at.some(a => Math.hypot(p.x - a.x, p.y - a.y) <= TALK.reach)) return;
     const phone = t.at?.some(a => PHONES.test(G.objects.get(a.obj).name));
     if (phone && !mouse.click && !mouse.right) return;
     if (phone) { mouse.click = mouse.right = false; if (hint) hint.talked = true; }
     talks.shift();
-    env.cutscene = conversation(G, t.pages, { drawFace });
+    if (film) film.talked = true;
+    env.cutscene = conversation(G, t.pages, { drawFace, fonts: talkFonts });
   }
 
   if (sonScene) for (const [face] of (TALKS[room.id] || []).flat()) if (face) need(face);
@@ -1146,6 +1156,7 @@ export async function play(env) {
   const night = NIGHT.room.test(room.name), floor2 = FLOOR2_HINT.room.test(room.name);
   const hint = (night || floor2) && G.text?.[NIGHT.hint.text] ? { font: await loadFont(G, NIGHT.hint.font), kills: stats.kills } : null;
   const restartFont = G.text?.[RESTART.text] ? await loadFont(G, RESTART.font) : null;
+  const talkFonts = G.text ? { text: await loadFont(G, TALK.fontName), skip: await loadFont(G, TALK.skip.font) } : {};
   const onKey = (e) => {
     if (env.paused?.()) return;
     if (e.type === 'keydown' && (e.target.closest?.('input, select, textarea, button') || e.target.isContentEditable)) return;
@@ -1163,7 +1174,7 @@ export async function play(env) {
     mouse.y = (e.clientY - r.top) * VIEW_H / r.height;
     // Ctrl+click is a Mac trackpad's right click.
     if (e.type === 'mousedown' && e.button === 0 && !e.ctrlKey) mouse.click = true;
-    if (e.type === 'mousedown' && (e.button === 2 || (e.button === 0 && e.ctrlKey))) mouse.right = true;
+    if (e.type === 'mousedown' && (e.button === 2 || (e.button === 0 && e.ctrlKey))) mouse.right = mouse.rightHeld = true;
     if (e.type === 'mousedown' && e.button === 1) { e.preventDefault(); pressed.add('q'); }
   };
   let wheelAt = -Infinity;
@@ -1182,6 +1193,8 @@ export async function play(env) {
   globalThis.document?.addEventListener('visibilitychange', visibility);
   canvas.addEventListener('mousemove', onMouse);
   canvas.addEventListener('mousedown', onMouse);
+  const onMouseUp = (e) => { if (e.button === 2 || e.button === 0) mouse.rightHeld = false; };
+  globalThis.addEventListener?.('mouseup', onMouseUp);
   canvas.addEventListener('contextmenu', noMenu);
   canvas.addEventListener('wheel', onWheel, { passive: false });
 
@@ -1921,7 +1934,7 @@ export async function play(env) {
     melee: b => bossHit(b, 12), // GUESS: melee fallback reach.
     pages: (TALKS[room.id] || []).flat(),
     say(pages, done) {
-      env.cutscene = conversation(G, pages, { drawFace, onEnd: done });
+      env.cutscene = conversation(G, pages, { drawFace, onEnd: done, fonts: talkFonts });
       if (!env.cutscene) done();
     },
     remove(b) { const i = bosses.indexOf(b); if (i >= 0) bosses.splice(i, 1); },
@@ -2364,6 +2377,7 @@ export async function play(env) {
       globalThis.document?.removeEventListener('visibilitychange', visibility);
       canvas.removeEventListener('mousemove', onMouse);
       canvas.removeEventListener('mousedown', onMouse);
+      globalThis.removeEventListener?.('mouseup', onMouseUp);
       canvas.removeEventListener('contextmenu', noMenu);
       canvas.removeEventListener('wheel', onWheel);
     },
