@@ -633,6 +633,7 @@ async function chapters(G, cx, canvas, startAct) {
 // seconds each, or a key.
 export async function card(G, canvas, zoom, s, kind) {
   if (kind === 'film') return film(G, canvas, zoom, s);
+  if (kind === 'act') return act(G, canvas, zoom, s);
   const cx = setup(canvas, zoom);
   const [pre, big, film1, film2] = await Promise.all(['fntPartPrefix', 'fntChapter', 'fntFilmTitle1', 'fntFilmTitle2'].map(n => loadFont(G, n)));
   const sp = await sprites(G, ['sprSun', 'sprPalmTrees', 'sprScanlines', 'sprNoise']);
@@ -660,6 +661,70 @@ export async function card(G, canvas, zoom, s, kind) {
       for (const [d, c] of [[3, '#000'], [0, css(merge(C.fuchsia, C.yellow, wave(2, tt)))]])
         drawText(cx, big, main, W / 2 + d, 96 + d + Math.sin(tt * 2) * 3, { align: 0.5, colour: c, scale: sc });
     }
+    cx.globalAlpha = 1;
+    tile(cx, sp.sprScanlines, 0.2);
+    tile(cx, sp.sprNoise, 0.05, (t * 37) % 160, (t * 53) % 160);
+  });
+}
+
+// The act card as the native rmPart draws it (objPartTitle, objFlock): black,
+// the act's number in fntPartPrefix over its name in fntPartTitle, each letter
+// a pink-to-red ramp over a red extrusion down and to the left, and once the
+// words are in, a sun with a dark red glow rising behind them and a few birds.
+// Colours and places are measured from the native capture.
+async function act(G, canvas, zoom, s) {
+  const cx = setup(canvas, zoom);
+  const [pre, big] = await Promise.all(['fntPartPrefix', 'fntPartTitle'].map(n => loadFont(G, n)));
+  const sp = await sprites(G, ['sprBird', 'sprScanlines', 'sprNoise']);
+  const off = new OffscreenCanvas(W, H), o = off.getContext('2d');
+  const [top, main] = s.act, sun = [237, 117], len = 300;
+  const birds = Array.from({ length: 5 }, (_, i) => [272 + i * 11, 78 + (i % 2) * 6, i * 0.7]);
+  // One word, each letter its own vertical ramp; returns the letters' left edges.
+  const ramp = (f, str, x, y, ramps) => {
+    o.clearRect(0, 0, W, H);
+    let at = x;
+    [...str].forEach((ch, i) => {
+      const g = f.chars?.get(ch.codePointAt(0));
+      drawText(o, f, ch, at, y, { colour: '#fff' });
+      const w = g ? g.adv : textWidth(f, ch), [a, b] = ramps(i);
+      const gr = o.createLinearGradient(0, y + (g?.oy ?? 0), 0, y + f.base);
+      gr.addColorStop(0, a); gr.addColorStop(1, b);
+      o.globalCompositeOperation = 'source-atop'; o.fillStyle = gr;
+      o.fillRect(at - 8, 0, w + 16, H);
+      o.globalCompositeOperation = 'source-over';
+      at += w;
+    });
+    cx.drawImage(off, 0, 0);
+  };
+  return loop(canvas, (t, ev) => {
+    if ((t > 20 && skip(ev)) || t > len) return true;
+    const fade = Math.min(1, t / 50, (len - t) / 20), rise = Math.max(0, Math.min(1, (t - 70) / 60));
+    cx.fillStyle = '#000'; cx.fillRect(0, 0, W, H);
+    if (rise) {
+      cx.globalAlpha = rise * fade;
+      const glow = cx.createRadialGradient(...sun, 0, ...sun, 110);
+      glow.addColorStop(0, 'rgba(120,10,0,0.9)'); glow.addColorStop(0.45, 'rgba(60,0,0,0.6)'); glow.addColorStop(1, 'rgba(0,0,0,0)');
+      cx.fillStyle = glow; cx.fillRect(0, 0, W, H);
+      const disc = cx.createLinearGradient(0, sun[1] - 23, 0, sun[1] + 23);
+      disc.addColorStop(0, '#f39a4e'); disc.addColorStop(1, '#c2402a');
+      cx.fillStyle = disc; cx.beginPath(); cx.arc(...sun, 23, 0, Math.PI * 2); cx.fill();
+      cx.filter = 'brightness(0.12)';
+      for (const [x, y, p] of birds) blit(cx, sp.sprBird, t / 8 + p * 3, x + Math.sin(t / 50 + p) * 4, y + Math.cos(t / 40 + p) * 2);
+      cx.filter = 'none';
+    }
+    cx.globalAlpha = fade;
+    const pw = textWidth(pre, top), px = Math.round(W / 2 - pw / 2);
+    drawText(cx, pre, top, px + 1, 91, { colour: '#000' });
+    drawText(cx, pre, top, px + 1, 90, { colour: '#d0182a' });
+    ramp(pre, top, px, 89, () => ['#f4e4f6', '#b896c8']);
+    const bw = textWidth(big, main), sc = Math.min(1, (W - 40) / bw), bx = Math.round(W / 2 - bw * sc / 2), by = 124;
+    for (let i = 6; i >= 1; i--)
+      drawText(cx, big, main, bx - i, by + i, { colour: `rgb(${235 - (i - 1) * 35},0,0)`, scale: sc });
+    // Each letter drifts between the pink ramp and a paler or bluer one.
+    ramp(big, main, bx, by, i => {
+      const k = Math.max(0, Math.sin(t / 45 + i * 0.9)) ** 3, m = (a, b) => Math.round(a + (b - a) * k);
+      return [`rgb(${m(252, 214)},${m(129, 170)},${m(213, 236)})`, `rgb(${m(238, 150)},${m(29, 40)},${m(46, 120)})`];
+    });
     cx.globalAlpha = 1;
     tile(cx, sp.sprScanlines, 0.2);
     tile(cx, sp.sprNoise, 0.05, (t * 37) % 160, (t * 53) % 160);
