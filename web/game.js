@@ -570,6 +570,7 @@ function gridPath(pg, x0, y0, x1, y1) {
 // GameMaker (the 24px strip under rmSonMansionFloor1's stair rails is only
 // passable past the bottom edge), so the box may stick out `ROOM_EDGE` px.
 export const ROOM_EDGE = 16;
+const ARRIVE_PAD = 32;
 function free(sol, box, x, y) {
   const l = Math.round(x) + box.l, t = Math.round(y) + box.t;
   const r = l + box.r - box.l, b = t + box.b - box.t, E = ROOM_EDGE;
@@ -1002,8 +1003,10 @@ export async function play(env) {
     const w = fan.start.find(w => arm[w]);
     if (w) { p.weapon = w; p.ammo = arm[w].ammo; p.sprite = arm[w].walk; }
   }
-  // The exit the player arrives on stays off until they step off it.
-  for (const x of exits) x.off = overlap(p, box, x, x.box);
+  // The exit the player arrives on stays off until they step off it. A hub
+  // arrival lands a few px in from that exit, so near counts as on.
+  const arriveBox = { l: box.l - ARRIVE_PAD, t: box.t - ARRIVE_PAD, r: box.r + ARRIVE_PAD, b: box.b + ARRIVE_PAD };
+  for (const x of exits) x.off = overlap(p, carry ? arriveBox : box, x, x.box) && (carry ? arriveBox : box);
   for (const l of elevators) l.used = overlap(p, box, l, l.box);
   const keys = new Set(), pressed = new Set();
   const mouse = { x: VIEW_W / 2, y: VIEW_H / 2, click: false, right: false };
@@ -1585,7 +1588,7 @@ export async function play(env) {
     cleared = clearFloor;
     for (const x of exits) {
       const on = overlap(p, box, x, x.box);
-      if (x.off && !on) x.off = false;
+      if (x.off && !overlap(p, x.off, x, x.box)) x.off = false;
       x.live = clearFloor && !x.off;
       if (x.live && on && !p.dead && !p.exec) return leave(null, x);
     }

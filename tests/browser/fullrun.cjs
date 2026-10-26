@@ -100,6 +100,7 @@ function installBot() {
     if (!p.sceneHidden && !free(g.solids, g.box, p.x, p.y)) bug('spawn in wall', `${Math.round(p.x)},${Math.round(p.y)}`);
     if (p.sprite && !B.art.has(p.sprite)) bug('player sprite not loaded', p.sprite);
     B.cur.at = `${Math.round(p.x)},${Math.round(p.y)}`;
+    B.cur.exitState = g.exits.map(x => `${x.x},${x.y}${x.grey ? ' grey' : ''}${x.off ? ' off' : ''}`).join(' | ');
     B.reachDue = true;
     if (!p.sceneHidden) reach(g, d);
   }
@@ -148,7 +149,9 @@ function installBot() {
         if (best) { add(used[0], 'step off elevator', best.x, best.y); return cands[0]; }
       }
       // Skip exits back to cleared hub rooms unless they are the only way on.
-      const all = g.exits.filter(x => x.live), fresh = all.filter(x => !x.grey);
+      // live is only set by the room's first step; a clear room's exits count from the start.
+      const clear = !g.enemies.some(e => e.isEnemy) && !g.kos.length && !g.bosses.length;
+      const all = g.exits.filter(x => x.live || clear && !x.off), fresh = all.filter(x => !x.grey);
       const live = fresh.length ? fresh : all;
       for (const x of live) add(x, 'exit', x.x + ((x.box?.l ?? 0) + (x.box?.r ?? 0)) / 2, x.y + ((x.box?.t ?? 0) + (x.box?.b ?? 0)) / 2);
       for (const l of g.elevators) add(l, 'elevator', l.x + ((l.box?.l ?? 0) + (l.box?.r ?? 0)) / 2, l.y + ((l.box?.t ?? 0) + (l.box?.b ?? 0)) / 2);
