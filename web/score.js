@@ -87,7 +87,7 @@ export function drawText(cx, f, s, x, y, { align = 0, colour = '#fff', scale = 1
 const LABEL = { kills: 'KILLS', time: 'TIME', score: 'LEVEL SCORE' };
 const COLOURS = ['#ff2ad4', '#2af6ff', '#ffe02a'];
 
-const clock = steps => {
+export const clock = steps => {
   const s = Math.floor(steps / 60);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };

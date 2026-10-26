@@ -5,7 +5,7 @@
 // draw 0xc11910, step 0xc15db0) and the scene setter 0x11c5bf0. The wave and
 // colour formulas are the decoded ones; positions the decode did not pin down
 // are placed by eye and say so.
-import { loadFont, drawText, textWidth } from './score.js';
+import { loadFont, drawText, textWidth, clock } from './score.js';
 import { options } from './settings.js';
 export { options } from './settings.js';
 
@@ -50,6 +50,17 @@ const SAVE = 'hlm2-web-progress';
 export const progress = {
   get() { try { return +localStorage.getItem(SAVE) || 0; } catch { return 0; } },
   reach(i) { try { if (i > this.get()) localStorage.setItem(SAVE, i); } catch {} },
+};
+// Best score and time per scene, for the chapter select's panel.
+const RECORDS = 'hlm2-web-records';
+export const records = {
+  all() { try { return JSON.parse(localStorage.getItem(RECORDS)) || {}; } catch { return {}; } },
+  get(i) { return this.all()[i]; },
+  put(i, { score = 0, steps = 0 } = {}) {
+    const all = this.all(), old = all[i];
+    all[i] = { score: Math.max(score, old?.score ?? 0), steps: old && old.steps < steps ? old.steps : steps };
+    try { localStorage.setItem(RECORDS, JSON.stringify(all)); } catch {}
+  },
 };
 
 // GameMaker colours (BGR in the exe, here as [r, g, b]).
@@ -376,8 +387,8 @@ function pick(ev, sel, n, boxes, active = () => true) {
 // The title menu. Resolves with { action, scene }.
 async function title(G, cx, canvas, a, openSettings) {
   G.audio.playMusic('beams');
-  const [, , font, pre, option, small] = a.fonts;
-  let sel = 0, screen = 'main', ssel = Math.min(progress.get(), STORY.length - 1), osel = 0, scroll = 0;
+  const [, , font, pre] = a.fonts;
+  let sel = 0, screen = 'main', osel = 0;
   return loop(canvas, (t, ev) => {
     drawTitleScene(cx, a, t);
     if (screen === 'main') {
@@ -387,41 +398,15 @@ async function title(G, cx, canvas, a, openSettings) {
       const r = pick(ev, sel, items.length, boxes);
       sel = r.sel;
       if (r.chose) {
-        if (sel === 0) return { action: 'story', scene: 0 };
-        if (sel === 1) screen = 'scenes';
+        // Both open the act carousel of rmLevelSelect: NEW GAME on the
+        // pilot, CONTINUE on the furthest act reached.
+        if (sel === 0 || sel === 1) {
+          const at = sel ? ACTS.findLastIndex(a => a.scenes[0] <= progress.get()) : 0;
+          return chapters(G, cx, canvas, at).then(r => r.action === 'back' ? title(G, cx, canvas, a, openSettings) : r);
+        }
         if (sel === 2) openSettings ? openSettings() : screen = 'options';
         if (sel === 3) return { action: 'viewer' };
       }
-    } else if (screen === 'scenes') {
-      // CONTINUE: every scene reached so far, act headers between.
-      const open = i => i <= progress.get();
-      cx.fillStyle = 'rgba(0,0,0,0.55)';
-      cx.fillRect(0, 0, W, H);
-      drawText(cx, pre, 'SELECT A SCENE', W / 2, 8, { align: 0.5, colour: '#fff' });
-      const rows = 8, gap = 22, first = Math.max(0, Math.min(ssel - 3, STORY.length - rows));
-      scroll += (first - scroll) * 0.3;
-      cx.save();
-      cx.beginPath();
-      cx.rect(0, 34, W, rows * gap);
-      cx.clip();
-      const boxes = [];
-      STORY.forEach((s, i) => {
-        const y = 36 + (i - scroll) * gap, on = i === ssel;
-        const colour = !open(i) ? '#5a3a5a' : on ? css(merge(C.fuchsia, C.aqua, wave(0.08, t))) : '#fff';
-        const dy = on ? Math.sin(t / 10) * 2 : 0;
-        if (s.act) drawText(cx, small, s.act[1], 16, y + 5, { colour: '#ff7ad9' });
-        for (const [d, c] of [[2, '#000'], [0, colour]]) {
-          drawText(cx, option, s.scene, 236 + d, y + d + dy, { align: 1, colour: c });
-          drawText(cx, option, open(i) ? s.title : '???', 252 + d, y + d + dy, { colour: c });
-        }
-        boxes[i] = { x0: 90, x1: W - 20, y0: y, y1: y + gap };
-      });
-      cx.restore();
-      drawText(cx, pre, 'ENTER: PLAY    ESC: BACK', W / 2, H - 22, { align: 0.5, colour: '#ccc' });
-      const r = pick(ev, ssel, STORY.length, boxes, open);
-      ssel = r.sel;
-      if (r.back) screen = 'main';
-      if (r.chose) return { action: 'story', scene: ssel };
     } else {
       cx.fillStyle = 'rgba(0,0,0,0.55)';
       cx.fillRect(0, 0, W, H);
@@ -434,6 +419,184 @@ async function title(G, cx, canvas, a, openSettings) {
       else if (r.chose && osel === 0) { options.music = !options.music; options.save(); G.audio.playMusic('beams'); }
       else if (r.chose && osel === 1) { options.censor = !options.censor; options.save(); }
     }
+  });
+}
+
+// --- rmLevelSelect (480x200, letterboxed here): objBoxSelector (create
+// 0x5103a0, step 0x5220c0, draw 0x517cc0). One screen per act, left/right
+// to turn: the act label (the player's own text, 3090 for the pilot and
+// 3116 on), the pilot's tape and each act's VHS box built from stacked
+// layer frames, the sun and the skyline behind, the act name in front.
+// Enter on a box lays its scene covers out (sprActNCoverLayers, five
+// layers each). Positions and motion were matched by eye against frames
+// of the real game.
+const ACTS = [
+  { label: 3090, title: 0, scenes: [0], item: 'sprMidnightAnimal' },
+  { label: 3116, title: 1, scenes: [1, 2, 3, 4], item: 'sprAct1BoxLayers', covers: 'sprAct1CoverLayers' },
+  { label: 3117, title: 5, scenes: [5, 6, 7, 8], item: 'sprAct2BoxLayers', covers: 'sprAct2CoverLayers' },
+  { label: 3118, title: 9, scenes: [9, 10, 11, 12], item: 'sprAct3BoxLayers', covers: 'sprAct3CoverLayers' },
+  { label: 3119, title: 13, scenes: [13, 14, 15, 16], item: 'sprAct4BoxLayers', covers: 'sprAct4CoverLayers' },
+  { label: 3120, title: 17, scenes: [17, 18, 19, 20], item: 'sprAct5BoxLayers', covers: 'sprAct5CoverLayers' },
+  { label: 3121, title: 21, scenes: [21, 22, 23, 24, 25, 26], item: 'sprAct6BoxLayers', covers: 'sprAct6CoverLayers' },
+];
+const ROOM_H = 200, OY = (H - ROOM_H) / 2;
+// A layered sprite: frames 0..n-1 drawn bottom to top, each a step up and
+// right, the stack turned by angle (degrees) about (x, y).
+function stack(cx, s, x, y, angle, { from = 0, n = s?.frames.length || 0, step = 0.75, scale = 1 } = {}) {
+  if (!s) return;
+  cx.save();
+  cx.translate(x, y);
+  cx.rotate(-angle * Math.PI / 180);
+  for (let i = 0; i < n; i++) {
+    const f = s.frames[from + i];
+    if (!f) break;
+    cx.drawImage(s.img, f.x, f.y, f.w, f.h, (-f.w / 2 + i * step * 0.45) * scale, (-f.h / 2 - i * step) * scale, f.w * scale, f.h * scale);
+  }
+  cx.restore();
+}
+// A sprite frame filled with one colour (the exe's image_blend).
+const tints = new Map();
+function tinted(s, i, colour) {
+  if (!s) return null;
+  const key = s.img, f = s.frames[i % s.frames.length], id = `${f.x},${f.y},${colour}`;
+  let m = tints.get(key);
+  if (!m) tints.set(key, m = new Map());
+  if (!m.has(id)) {
+    const c = new OffscreenCanvas(f.w, f.h), x = c.getContext('2d');
+    x.drawImage(s.img, f.x, f.y, f.w, f.h, 0, 0, f.w, f.h);
+    x.globalCompositeOperation = 'multiply';
+    x.fillStyle = colour;
+    x.fillRect(0, 0, f.w, f.h);
+    x.globalCompositeOperation = 'destination-in';
+    x.drawImage(s.img, f.x, f.y, f.w, f.h, 0, 0, f.w, f.h);
+    m.set(id, c);
+  }
+  return m.get(id);
+}
+async function chapters(G, cx, canvas, startAct) {
+  const names = ['sprCityScape', 'sprCitySun', 'sprCloudsSmoke', 'sprMusicCassette', 'sprScanlines', 'sprNoise', ...new Set(ACTS.flatMap(a => [a.item, a.covers].filter(Boolean)))];
+  const [s, fonts] = await Promise.all([sprites(G, names),
+    Promise.all(['fntVHSTitle', 'fntVHSSubtitle', 'fntVHSStats', 'fntVHSGrading', 'fntVHSMusic'].map(n => loadFont(G, n)))]);
+  const [fTitle, fLabel, fStats, fGrading, fMusic] = fonts;
+  const reached = i => i <= progress.get();
+  const open = i => reached(ACTS[i].scenes[0]);
+  const text = (id, or) => G.text?.[id] || or;
+  // view: the carousel position; pick: -1 browsing acts, else the scene
+  // shown (Enter); pull: 0..1 how far the box has moved aside for it.
+  let act = Math.max(0, Math.min(startAct, ACTS.length - 1)), view = act, slide = 0, pick = -1, pull = 0, picked = 0;
+  return loop(canvas, (t, ev) => {
+    const tt = t / 60, a = ACTS[act], list = a.scenes.filter(reached);
+    for (const e of ev) {
+      const turn = e.k === 'left' || e.k === 'up' ? -1 : e.k === 'right' || e.k === 'down' ? 1 : e.k === 'click' && (e.x < 120 || e.x > 360) ? (e.x < 240 ? -1 : 1) : 0;
+      if (pick < 0) {
+        if (turn) {
+          // Only reached acts are in the carousel; it wraps.
+          let n = act;
+          do n = (n + turn + ACTS.length) % ACTS.length; while (!open(n));
+          if (n !== act) { slide = turn; act = n; G.audio.play?.('sndMenuMove'); }
+        } else if (e.k === 'ok' || e.k === 'click') { pick = 0; picked = t; slide = 0; G.audio.play?.('sndMenuSelect'); }
+        else if (e.k === 'back') return { action: 'back' };
+      } else {
+        if (turn && list.length > 1) { pick = (pick + turn + list.length) % list.length; slide = turn; picked = t; G.audio.play?.('sndMenuMove'); }
+        else if (e.k === 'ok' || e.k === 'click') { G.audio.play?.('sndMenuSelect'); return { action: 'story', scene: list[pick] }; }
+        else if (e.k === 'back') pick = -1;
+      }
+    }
+    view += (act - view) * 0.12;
+    slide *= 0.88;
+    pull += ((pick >= 0) - pull) * 0.15;
+    const pilot = !a.covers, scene = pick >= 0 ? list[pick] : a.title;
+    cx.fillStyle = '#000';
+    cx.fillRect(0, 0, W, H);
+    cx.save();
+    cx.beginPath(); cx.rect(0, OY, W, ROOM_H); cx.clip();
+    cx.translate(0, OY);
+    // Sky: deep red darkening to the right, an orange glow at the top left.
+    const sky = cx.createLinearGradient(0, 0, W, 0);
+    sky.addColorStop(0, '#f2584a'); sky.addColorStop(0.55, '#d8303f'); sky.addColorStop(1, '#a0142f');
+    cx.fillStyle = sky; cx.fillRect(0, 0, W, ROOM_H);
+    const glow = cx.createRadialGradient(10, 10, 0, 10, 10, 330);
+    glow.addColorStop(0, 'rgba(255,225,150,1)'); glow.addColorStop(0.4, 'rgba(255,150,90,0.7)'); glow.addColorStop(1, 'rgba(255,80,90,0)');
+    cx.fillStyle = glow; cx.fillRect(0, 0, W, ROOM_H);
+    if (s.sprCloudsSmoke) {
+      cx.globalCompositeOperation = 'screen'; cx.globalAlpha = 0.2;
+      const f = s.sprCloudsSmoke.frames[0];
+      for (let k = 0; k < 2; k++) blit(cx, s.sprCloudsSmoke, k, ((k * 240 - t * 0.15) % (W + f.w) + W + f.w) % (W + f.w) - f.w, -40);
+      cx.globalAlpha = 1; cx.globalCompositeOperation = 'source-over';
+    }
+    cx.fillStyle = 'rgba(80,0,30,0.12)';
+    for (let y = 0; y < 120; y += 4) cx.fillRect(0, y, W, 2);
+    // The sun under the middle, then two skylines scrolling at two speeds.
+    const sun = tinted(s.sprCitySun, 0, '#ff4f86');
+    if (sun) { cx.save(); cx.shadowColor = '#ff2a6a'; cx.shadowBlur = 14; cx.drawImage(sun, W / 2 - 18, 110, 36, 36); cx.restore(); }
+    for (const [frame, colour, y, speed] of [[1, '#c0243f', 96, 0.1], [0, '#9a1030', 106, 0.25]]) {
+      const f = s.sprCityScape?.frames[frame];
+      if (!f) break;
+      const img = tinted(s.sprCityScape, frame, colour), off = (t * speed) % f.w;
+      for (let x = -off; x < W; x += f.w) cx.drawImage(img, Math.round(x), y);
+    }
+    const ground = cx.createLinearGradient(0, 150, 0, ROOM_H);
+    ground.addColorStop(0, '#a3123a'); ground.addColorStop(1, '#d4234c');
+    cx.fillStyle = ground; cx.fillRect(0, 150, W, ROOM_H - 150);
+    cx.fillStyle = 'rgba(60,0,20,0.35)';
+    for (let k = 0; k < 7; k++) cx.fillRect(0, 152 + k * k * 1.1, W, 1);
+    // The carousel. Picking the pilot pulls its tape forward and the rest
+    // away; picking an act moves its box left and a scene cover slides out.
+    ACTS.forEach((b, i) => {
+      if (!open(i)) return;
+      let x = W / 2 + (i - view) * 115;
+      const bob = Math.sin(tt * 2 + i) * 3, tilt = Math.sin(tt * 1.3 + i) * 4, own = i === act;
+      if (!own) x += pull * 400 * Math.sign(i - act);
+      else x -= pull * (pilot ? 33 : 63);
+      if (x < -70 || x > W + 70) return;
+      if (!b.covers) { stack(cx, s[b.item], x, 87 + bob * (1 - pull), -6 + tilt * (1 - pull), { step: 0.9, scale: 1 + (own ? pull * 0.3 : 0) }); return; }
+      if (own && pull > 0.02 && pick >= 0) {
+        // The scene's cover (five layers per cover), sliding out to the right.
+        const k = s[b.covers] ? s[b.covers].frames.length / 5 : 4, j = k - 1 - b.scenes.indexOf(list[pick]), out = Math.min(1, (t - picked) / 18);
+        stack(cx, s[b.covers], x + 28 * out * pull, 86, -3, { from: j * 5, n: 5, step: 0.8, scale: 1.1 });
+      }
+      stack(cx, s[b.item], x, 83 + bob * (1 - pull), 8 + tilt * (1 - pull), { step: 0.75, scale: 1.15 });
+    });
+    // The label: the act, or the scene once one is shown.
+    const lc = css(merge([52, 214, 180], [255, 90, 170], wave(1.2, tt)));
+    const label = pick >= 0 && !pilot ? text(3090 + scene, STORY[scene].scene) : text(a.label, a.label === 3090 ? 'Pilot' : 'Act ' + act);
+    drawText(cx, fLabel, label, W / 2 + 1, 7, { align: 0.5, colour: '#40001a' });
+    drawText(cx, fLabel, label, W / 2, 6, { align: 0.5, colour: lc });
+    // The big name: the act's, or the scene's, sliding in on a turn.
+    const name = pick >= 0 && !pilot ? STORY[scene].title : STORY[a.title].act?.[1] || STORY[a.title].title;
+    const sc = Math.min(1, (W - 40) / Math.max(1, textWidth(fTitle, name)));
+    const tx = W / 2 + slide * 300, ty = 156 - fTitle.line * sc / 2;
+    for (let d = 6; d > 0; d--) drawText(cx, fTitle, name, tx + d * 0.6, ty + d, { align: 0.5, colour: d > 4 ? '#3a0016' : '#ff3d8b', scale: sc });
+    drawText(cx, fTitle, name, tx, ty, { align: 0.5, colour: '#3fe0b5', scale: sc });
+    if (pull > 0.5) {
+      cx.globalAlpha = Math.min(1, (pull - 0.5) * 2);
+      const px = 248, row = (str, y, colour) => {
+        drawText(cx, fStats, str, px + 1, y + 1, { colour: '#3a0016' });
+        drawText(cx, fStats, str, px, y, { colour });
+      };
+      if (pilot) {
+        // The film's own notes: title, length, rating.
+        [2979, 2980, 2981].forEach((id, k) => row(text(id, ''), 52 + k * 20, k === 2 ? '#ff6a3d' : '#ffe9a8'));
+      } else {
+        const rec = records.get(scene);
+        row(`${text(3122, 'HIGHSCORE')}: ${rec?.score ?? 0}`, 52, '#ffe9a8');
+        row(`${text(3123, 'BEST TIME')}: ${rec ? clock(rec.steps) : text(3124, 'Unknown')}`, 72, '#ffe9a8');
+        row(text(2978, 'LEADERBOARDS'), 92, '#ffe9a8');
+        drawText(cx, fGrading, text(3126, 'Grade') + ':', px + 2, 112, { colour: '#0a3a12' });
+        drawText(cx, fGrading, text(3126, 'Grade') + ':', px, 110, { colour: css(merge([40, 220, 90], [180, 255, 120], wave(2, tt))) });
+      }
+      // The scene's track on a cassette at the bottom.
+      const raw = STORY[pilot ? 0 : scene].track, track = raw && raw[0].toUpperCase() + raw.slice(1);
+      if (track) {
+        const w = textWidth(fMusic, track);
+        blit(cx, s.sprMusicCassette, scene % 27, W / 2 - w / 2 - 34, 183);
+        drawText(cx, fMusic, track, W / 2 - w / 2, 184, { colour: '#f0e0e8' });
+      }
+      cx.globalAlpha = 1;
+    }
+    cx.restore();
+    tile(cx, s.sprScanlines, 0.12);
+    tile(cx, s.sprNoise, 0.05, (t * 37) % 160, (t * 53) % 160);
   });
 }
 

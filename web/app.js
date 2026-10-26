@@ -6,7 +6,7 @@ import * as T from './tables.js';
 import { play, musicFor, SOUND } from './game.js';
 import { Audio, RemoteFile } from './audio.js';
 import { scoreScreen } from './score.js';
-import { frontEnd, card, maskMenu, PICKER_OBJECTS, abortMenu, STORY, progress, options } from './menu.js';
+import { frontEnd, card, maskMenu, PICKER_OBJECTS, abortMenu, STORY, progress, records, options } from './menu.js';
 import { YouTubePlayer, youtubeTrack } from './youtube.js';
 import { SOUNDTRACK, SOUNDTRACK_MIX, SceneSoundtrack, trackLabel, trackSearch } from './soundtrack.js';
 import { drawRoomItems } from './render.js';
@@ -409,6 +409,7 @@ function storyNext(room, carry) {
   // The prologue is a film shoot: the game goes straight on, no score.
   if (s.score === false) { progress.reach(i + 1); runScene(i + 1); return true; }
   status(`${s.title} cleared. Click or press a key to go on.`);
+  records.put(i, carry?.stats);
   showScore(s.title, carry?.stats || { kills: 0, steps: 0 }).then(continued => {
     if (!continued) return;
     progress.reach(i + 1);

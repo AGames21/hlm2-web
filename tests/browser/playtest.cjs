@@ -8,6 +8,8 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const { dataWad, musicWad } = require('./fixture.cjs');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+// NEW GAME opens the chapter select: Enter shows the pilot's notes, Enter again plays it.
+const openPilot = async page => { for (let i = 0; i < 2; i++) { await delay(700); await page.keyboard.press('Enter'); } };
 const failures = [];
 let passed = 0;
 async function check(name, run) {
@@ -321,6 +323,7 @@ async function punchAndFinish(page) {
       await page.locator('#settings-dialog').waitFor({ state: 'visible' }); await page.locator('#settings-close').click();
       await page.evaluate(() => document.activeElement.blur());
       await page.keyboard.press('ArrowUp'); await page.keyboard.press('ArrowUp'); await page.keyboard.press('Enter');
+      await openPilot(page);
       await page.waitForFunction(() => document.querySelector('#status').textContent.includes('PROLOGUE'));
       await delay(450); await page.keyboard.press('Space'); await page.waitForFunction(() => window.game?.room === 'rmTutorialFloor1');
     });
@@ -365,6 +368,7 @@ async function punchAndFinish(page) {
     });
     await check('Prologue skips the score; act card, scene card, intro skip and saved progression', async () => {
       await page.keyboard.press('ArrowUp'); await page.keyboard.press('Enter');
+      await openPilot(page);
       await page.waitForFunction(() => document.querySelector('#status').textContent.includes('PROLOGUE'));
       await delay(450); await page.keyboard.press('Space');
       await page.waitForFunction(() => window.game?.room === 'rmTutorialFloor1');
