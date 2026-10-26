@@ -222,7 +222,7 @@ async function startPlay(name = $('room').value, carry = null, track, character 
   const frames = name => findFrames(name, levelAtlas);
   // The player's sprites often live in shared atlases the room doesn't use.
   const load = async atlas => { if (!imgs.has(atlas)) imgs.set(atlas, await image(atlas)); };
-  const env = { G, room, items, imgs, frames, load, canvas: $('canvas'), zoom: zoomNow(), carry, character,
+  const env = { G, room, items, imgs, frames, load, canvas: $('canvas'), zoom: zoomNow(), carry, character, intro: !!story?.intro,
     status: message => { if (request === menuToken) status(message); },
     cancelled: () => request !== menuToken,
     paused: () => $('settings-dialog').open,

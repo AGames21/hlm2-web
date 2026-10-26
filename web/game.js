@@ -437,6 +437,8 @@ export const DOG = { recheck: 10, speed: 4, kill: 22, imageSpeed: 0.1, runImage:
 // one frame per direction (from vars 32/36). Here the direction is taken from
 // the nearest room edge, which is a guess.
 export const EXIT = { objects: ['objNextroom'] };
+// How near the van the player walks to leave the hideout (a guess; the van's own mask is not decoded).
+export const INTRO_VAN_REACH = 48;
 // objStartPoint (709, no sprite; create 0xbd7800, alarm 0xbd7770, draw
 // 0xbd78f0) marks the jungle and power plant screens, which have no player
 // instance. Its draw shows a blinking sprArrow turned by the room edge once no
@@ -1010,8 +1012,12 @@ export async function play(env) {
   const talks = talkList.map((pages, k) => {
     for (const [face] of pages) if (face) need(face);
     const near = talkers.filter(t => G.objects.get(t.obj).sprite >= 0);
-    return { pages, at: script && k === 0 || !near.length ? null : near };
+    return { pages, at: (script || env.intro) && k === 0 || !near.length ? null : near };
   });
+  // Native: in the Fans' hideout the talk ends with the player free; the scene
+  // goes on when they walk to the van (objFansVan).
+  const van = env.intro && room.insts.find(i => G.objects.get(i.obj)?.name === 'objFansVan');
+  let vanWait = false;
   // The date card (objDate): place, date and time over a black backing,
   // held, then faded out by 0.01 a frame (draw 0x6ca7d0).
   let card = DATES[room.id] && G.text?.[DATES[room.id][0]] ? { row: DATES[room.id], hold: DATE_CARD.hold, alpha: 1 } : null;
@@ -1042,7 +1048,11 @@ export async function play(env) {
   function stepTalk() {
     talkClock++;
     if (env.cutscene && !env.cutscene.done || p.dead) return;
-    if (!talks.length) { if (env.cutscene) { env.cutscene = null; env.talkDone?.(); } return; }
+    if (!talks.length) {
+      if (env.cutscene) { env.cutscene = null; if (van) vanWait = true; else env.talkDone?.(); }
+      if (vanWait && Math.hypot(p.x - van.x, p.y - van.y) <= INTRO_VAN_REACH) { vanWait = false; env.talkDone?.(); }
+      return;
+    }
     const t = talks[0];
     // Native: the first talk plays while the director is still walking down; the
     // next waits for him to stop and the camera to pan over to the set.
@@ -1830,7 +1840,7 @@ export async function play(env) {
     for (const l of elevators) if (stepElevator(l, clearFloor)) return leave(l);
     if (coupleRoom && !enemies.length && !kos.length && !p.exec && !p.dead && ++cutWait > COUPLE.cut) return leave();
     if (film?.arrived && !talks.length && !env.cutscene && ++film.wait > FILM_SET.after) return leave();
-    if (autoEnd && clearFloor && !talks.length && !env.cutscene && !p.dead && !p.exec && ++endWait > ROOM_END.wait) return leave();
+    if (autoEnd && clearFloor && !talks.length && !env.cutscene && !vanWait && !p.dead && !p.exec && ++endWait > ROOM_END.wait) return leave();
   }
   // Returns true when the ride is over.
   function stepElevator(l, clearFloor) {
@@ -2204,6 +2214,7 @@ export async function play(env) {
     if (p.dead && restartFont && env.restart) drawRestart();
     if (night) { if (hint) drawHint(); return; }
     if (hint) drawHint();
+    if (env.intro) return;
     cx.save();
     cx.font = 'bold 10px monospace';
     cx.textAlign = 'center';
