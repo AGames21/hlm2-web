@@ -163,8 +163,7 @@ export const BULLET = { margin: 100 };
 // global at +0xa90 is 18, not identified; left out). Within 22px of a weapon
 // the unarmed chaser picks it up (sndPickUpWeapon); it is not a hit.
 // Still guesses: the melee swing (a hit at the attack sprite's middle frame,
-// only if the player is still in reach and in front), the first-shot delay,
-// and the search after losing the player (straight at the last spot).
+// only if the player is still in reach and in front) and the search after losing the player (straight at the last spot).
 // Sounds (sound_play 0x12c97c0 takes the sound's GML global; ids from the
 // registration run, names and volumes from hlm2_sounds.bin). Guns carry
 // their own in GUNS/ENEMY_GUNS (0x1116c70 player, 0xee5fa0 enemy branches).
@@ -1436,7 +1435,7 @@ export async function play(env) {
     const g = e.g;
     if (--e.check <= 0) {
       e.check = e.dog ? DOG.recheck : ENEMY.recheck;
-      // The first shot waits one re-check (a guess at the reaction time).
+      // The first shot waits 15 steps of sight (var 17, set to 15 at create).
       if (spots(e)) {
         if (!e.alert) { e.wait = ENEMY.recheck; if (e.dog) sfx(DOG.bark); }
         e.alert = true; e.seen = { x: p.x, y: p.y };
@@ -1486,6 +1485,9 @@ export async function play(env) {
           fire(e, e.angle, g, false, g.side !== undefined ? 1 : 0);
         }
       } else {
+        // Out of sight, the search state (var 31 = 3 in 0x11a9000) sets the
+        // first-shot counter (var 17) back to 15, so a re-spotted gunner waits again.
+        if (g && !see) e.wait = ENEMY.recheck;
         // Unarmed and in sight: run straight in (0xf4e710). Otherwise, or when
         // a wall is in the way (seen through a gap), follow a path to the
         // player, made again every 20 steps.
