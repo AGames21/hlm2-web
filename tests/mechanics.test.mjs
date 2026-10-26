@@ -54,7 +54,7 @@ test('A hiding gunner fires, can kill the player, and permits restart after deat
 
 test('An alerted enemy navigates around solid geometry without entering it', async t => {
   const { game } = await fixture({ kind: 'objEMafiaStatic', configure: ({ objects, room, addSprite }) => {
-    objects[3].sprite = addSprite('sprEMafiaWalkUnarmed');
+    objects[3].sprite = addSprite('sprEMafiaWalkBat');
     objects.push({ id: 4, name: 'objSolid', parent: -1, sprite: 1, mask: 1, depth: 0 });
     for (let y = 4; y < 164; y += 8) room.insts.push({ id: 100 + y, obj: 4, x: 292, y });
   } }); t.after(() => game.stop());

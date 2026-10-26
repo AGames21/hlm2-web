@@ -152,7 +152,14 @@ export const BULLET = { margin: 100 };
 // a step when closer than 32 and turns its aim 10 degrees a step (0x1175ca0).
 // It fires (0xee5fa0) while var 17 is 0; the gun's own counter (var 65) then
 // makes it wait `cooldown` steps between shots.
-// Unarmed, it runs at 2.5 and hits within 22 (the chaser 0xf4e710).
+// With a melee weapon it runs in at 2.5 and swings.
+// Unarmed (any *WalkUnarmed sprite, 0xfad250) the step skips the states and
+// runs 0xf4e710 (ENEMY.unarmed): it goes for the nearest weapon on the floor
+// that is moving under 2 (straight at 2.5, image speed 0.2, when the line is
+// clear, else by path) and takes it within 22 (sndPickUpWeapon, the weapon is
+// destroyed). With no weapon it stops and turns its aim 10 degrees a step
+// toward the player beyond 64px, and inside 64 steps 1px toward them (x and y
+// each only if free). It never punches.
 // The gang (objEGang*) runs the same step (0x74d0b0) and draw; only the
 // creates differ. objEGangRandom (0x74cfc0) and objEGangStatic (0x74e190) swap
 // a 9mm or Uzi for choose(Uzi, Shotgun, 9mm); objEGangMeleeRandom (0x74b580)
@@ -214,6 +221,7 @@ export function musicFor(rooms, room) {
 export const ENEMY = { wanderMin: 60, wanderRand: 60, wanderAnim: 0.1, ahead: 3, recheck: 15,
   accel: 0.25, maxSpeed: 3, hold: 120, near: 32, backOff: 1.5, turn: 10,
   chaseSpeed: 2.5, melee: 22, legsSpeed: 0.2, sight: 260, reach: 30, front: 60,
+  unarmed: { run: 2.5, image: 0.2, take: 22, slow: 2, near: 64, creep: 1 },
   guns: ['M16', 'Shotgun', 'DoubleBarrel', 'Kalashnikov'] };
 // Create-time weapon swaps: object -> [held weapon that is swapped (null:
 // always), choices].
@@ -736,7 +744,7 @@ export async function play(env) {
   // (sprEGangIdlePipe) take the base from before Idle.
   const mkEnemy = (obj, x, y, walking, gun) => {
     const o = G.objects.get(obj), sname = G.sprites.get(o.sprite).name, base = sname.replace(/(Idle\w*|Walk\w*)$/, '');
-    const e = { obj, kind: o.name, isEnemy: inherits(G, o, 'objEnemy'), x, y, box: o.mask >= 0 ? maskBox(G, o) : box, angle: 0, alert: false, frame: 0, imageSpeed: VICTIM1.idleSpeed,
+    const e = { obj, base, kind: o.name, isEnemy: inherits(G, o, 'objEnemy'), x, y, box: o.mask >= 0 ? maskBox(G, o) : box, angle: 0, alert: false, frame: 0, imageSpeed: VICTIM1.idleSpeed,
       spr: { idle: need(base + 'Idle') || need(sname), walk: need(base + 'Walk'), cower: need(base + 'Idle2'), getUp: need(base + 'GetUp') } };
     e.spr.killBlunt = need(base + 'KillBlunt');
     e.spr.killStomp = need(base + 'KillStomp');
@@ -1442,7 +1450,9 @@ export async function play(env) {
       }
     }
     let speed = 0;
-    if (!e.alert) {
+    if (e.gun === 'Unarmed' && !e.dog && unarmed(e)) {
+      // 0xf4e710 moved it (stepUnarmed below).
+    } else if (!e.alert) {
       if (!e.still && --e.alarm <= 0) {
         e.alarm = ENEMY.wanderMin + Math.floor(random(ENEMY.wanderRand));
         e.moveDir = random(360);
@@ -1539,6 +1549,53 @@ export async function play(env) {
       if (e.frame >= n) { e.sprite = e.spr.walk; e.frame = 0; e.swing = false; }
     } else if (e.swing) melee(e);
     else e.frame += e.imageSpeed;
+  }
+
+  // 0xf4e710: an unarmed enemy fetches a weapon, else holds off. Returns false
+  // when there is nothing to do (calm, no weapon), so the calm wander runs.
+  function unarmed(e) {
+    const U = ENEMY.unarmed;
+    let w = null, best = Infinity;
+    for (const q of weapons) {
+      const d = dist(e, q);
+      if (d < best && q.speed < U.slow && need(e.base + 'Walk' + q.name)) { best = d; w = q; }
+    }
+    e.hs = e.vs = 0;
+    if (w) {
+      const dir = pointDir(e.x, e.y, w.x, w.y);
+      if (sees(e, w)) {
+        e.path = null;
+        e.hs = lenX(U.run, dir); e.vs = lenY(U.run, dir); e.angle = dir;
+      } else {
+        if (!(--e.repath > 0)) { e.repath = PATH.every; e.path = pathTo(e, w.x, w.y); }
+        followPath(e);
+      }
+      e.imageSpeed = U.image;
+      if (best < U.take) takeWeapon(e, w);
+    } else if (!e.alert || p.dead) return false;
+    else {
+      e.path = null;
+      const dir = pointDir(e.x, e.y, p.x, p.y);
+      if (dist(e, p) >= U.near) { e.imageSpeed = 0; e.angle = turnToward(e.angle, dir, ENEMY.turn); }
+      else {
+        e.angle = dir;
+        e.hs = lenX(U.creep, dir); e.vs = lenY(U.creep, dir);
+        e.imageSpeed = ENEMY.wanderAnim * U.creep;
+      }
+    }
+    if (e.hs || e.vs) e.moveDir = pointDir(0, 0, e.hs, e.vs);
+    return true;
+  }
+  // 0xee4300: the enemy arms with the weapon (its Walk/Attack sprites).
+  function takeWeapon(e, w) {
+    const held = w.name;
+    weapons.splice(weapons.indexOf(w), 1);
+    sfx(SOUND.pickup);
+    e.gun = held; e.g = ENEMY_GUNS[e.base.slice(3) + held] || ENEMY_GUNS[held];
+    e.spr.walk = e.spr.idle = need(e.base + 'Walk' + held);
+    e.spr.attack = need(e.base + 'Attack' + held) || need(e.base + 'Attack' + held + '1') || (held === 'Machete' && need(e.base + 'AttackMachette'));
+    e.sprite = e.spr.walk; e.frame = 0; e.path = null;
+    e.cooldown = 0; e.wait = ENEMY.recheck;
   }
 
   // The swing hits the player still in reach and in front of the enemy.

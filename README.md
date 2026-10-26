@@ -61,8 +61,10 @@ Step 8 is done. Enemy pathfinding follows the exe's mp_grid setup (grid builder 
 `re/ghidra/out/d19t.c`): 16-px cells blocked by objSolid, objFurniture and objElevator; the goal
 is the first free cell on rings of 1, 6 and 11 px around the player (8 angles, random start,
 0x42c900); the path is made again every 20 steps and walked at 2.5 px/step without collision, as
-`path_start` does (`PATH`, `gridPath`, `pathTo`, `followPath` in `web/game.js`). An unarmed enemy
-runs straight in when it sees the player and the step is free, else follows the path. Idle enemies
+`path_start` does (`PATH`, `gridPath`, `pathTo`, `followPath` in `web/game.js`). A melee enemy
+runs straight in when it sees the player and the step is free, else follows the path. An unarmed
+one (0xf4e710) fetches the nearest floor weapon the same way and arms with it within 22px; with
+none left it holds off, creeping 1px a step once within 64px, and never punches. Idle enemies
 (objEGangIdle*, objEMafiaIdle*) check sight every 15 steps and, on sight, turn into their alert
 type with the weapon they carry (`IDLE.become`). Fat enemies (objE{Gang,Mafia}Fat) have 5 HP, one
 per bullet; once hurt they bleed out after 100 steps (`FAT`). Test rooms: rmFansLevel1Floor2
@@ -336,7 +338,12 @@ mask `sprMask` (24×24, origin 12,12, fully solid).
   random(360), speed round(random(1)), image speed speed × 0.1. The alert step 0x11a9000 re-checks
   sight every 15 steps (var 88) and switches on state var 31 (0 calm, 1–2 alert, 3 search, 4+);
   Sight helper 0x42d8e0 (`d51t.c`): seen within 260px (160 when the global at +0xa90 is 18), the line
-  walked in 8px steps. The unarmed chaser 0xf4e710's 22px check is a weapon pickup, not a hit.
+  walked in 8px steps. Unarmed (any *WalkUnarmed sprite, 0xfad250) the step skips the state machine
+  and runs 0xf4e710: the nearest weapon moving under 2 (0x11014d0) is the goal, straight at 2.5
+  (image speed 0.2) when its line is clear, else a path (0xf500f0); within 22 it is taken (0xee4300,
+  sndPickUpWeapon, instance destroyed). No weapon: beyond 64px of the player stop and turn the aim
+  10° a step; inside, step 1px toward the player (0x415a30 is a - b, so point_direction(player,
+  self) - 180), x and y each only when place_free.
   First shot: var 17 is 15 at create and counts down only while the gunner sees the player (fires at
   0); the search state (var 31 = 3) sets it back to 15, so a re-spotted gunner waits again.
   Chase (seeing, armed): motion_add 0.25 toward the player up to speed 3 beyond 120px, brake 0.25
