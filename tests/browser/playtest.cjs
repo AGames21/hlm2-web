@@ -221,7 +221,11 @@ async function punchAndFinish(page) {
     });
     await stepOntoExit(page, true);
     await check('Level-end score screen appears after both floors', async () => {
-      await page.waitForFunction(() => document.querySelector('#status').textContent.includes('cleared. Click'));
+      try {
+        await page.waitForFunction(() => document.querySelector('#status').textContent.includes('cleared. Click'));
+      } catch (error) {
+        throw new Error(`${error.message}; state: ${JSON.stringify(await page.evaluate(() => ({ status: document.querySelector('#status').textContent, room: window.game.room, dead: window.game.player.dead, enemies: window.game.enemies.length, ...window.game.diagnostics() })))}`);
+      }
     });
     await delay(600);
     await check('Score screen ignores keyboard activity in Settings', async () => {

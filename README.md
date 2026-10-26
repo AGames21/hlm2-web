@@ -33,8 +33,8 @@ or DeadShotgun art. The mafia (objEMafiaRandom, Patrol, Static, MeleeRandom) wan
 spot the player, wait 15 steps, then close in and shoot, or run in with a melee weapon; a bullet or a
 melee mafia kills the player (R restarts the room). Knocked-out mafia drop the gun if the pig can use
 it. Constants are in `GUNS`, `BULLET` and `ENEMY`. Enemies see the player only within 260px
-(0x42d8e0) and wait 15 steps of sight before the first shot, again after losing you. Guesses: chase speed, the dead-sprite pose, and the melee swing (the hit lands at the
-attack sprite's middle frame if the player is still within 30px and in front). Rooms without a player start the pig
+(0x42d8e0) and wait 15 steps of sight before the first shot, again after losing you. A melee enemy swings within 22px (30-step cooldown) and, on every step of the swing, kills a
+non-rolling player whose mask holds the point 8px in front of it (step 0x11a7660). Guesses: chase speed and the dead-sprite pose. Rooms without a player start the pig
 near the centre, 64px clear of enemies.
 
 Step 6 is done. Once no enemy or knocked-out body is left, the room's objNextroom shows an arrow,

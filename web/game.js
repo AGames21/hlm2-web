@@ -169,8 +169,13 @@ export const BULLET = { margin: 100 };
 // player is seen within 260px along a line walked in 8px steps (160px when a
 // global at +0xa90 is 18, not identified; left out). Within 22px of a weapon
 // the unarmed chaser picks it up (sndPickUpWeapon); it is not a hit.
-// Still guesses: the melee swing (a hit at the attack sprite's middle frame,
-// only if the player is still in reach and in front) and the search after losing the player (straight at the last spot).
+// Melee (step 0x11a7660 for *MeleeRandom, 0x11a43e0 Patrol): chasing within
+// 22px with its cooldown (30 steps) done, it swings: attack sprite from frame
+// 1 at image_speed 0.5 and a swing sound. On every step of the swing
+// (scrIsAttacking is true for the whole animation) it kills a player who is
+// not rolling (0xfacd80) and whose mask holds the point 8px ahead of it or
+// its own spot; 0xee3f10 marks that death as melee.
+// Still a guess: the search after losing the player (straight at the last spot).
 // Sounds (sound_play 0x12c97c0 takes the sound's GML global; ids from the
 // registration run, names and volumes from hlm2_sounds.bin). Guns carry
 // their own in GUNS/ENEMY_GUNS (0x1116c70 player, 0xee5fa0 enemy branches).
@@ -220,7 +225,8 @@ export function musicFor(rooms, room) {
 
 export const ENEMY = { wanderMin: 60, wanderRand: 60, wanderAnim: 0.1, ahead: 3, recheck: 15,
   accel: 0.25, maxSpeed: 3, hold: 120, near: 32, backOff: 1.5, turn: 10,
-  chaseSpeed: 2.5, melee: 22, legsSpeed: 0.2, sight: 260, reach: 30, front: 60,
+  chaseSpeed: 2.5, melee: 22, legsSpeed: 0.2, sight: 260,
+  swing: { image: 0.5, start: 1, cool: 30, ahead: 8 },
   unarmed: { run: 2.5, image: 0.2, take: 22, slow: 2, near: 64, creep: 1 },
   guns: ['M16', 'Shotgun', 'DoubleBarrel', 'Kalashnikov'] };
 // Create-time weapon swaps: object -> [held weapon that is swapped (null:
@@ -1515,12 +1521,11 @@ export async function play(env) {
           if (e.spr.attack && e.sprite !== e.spr.attack) { e.sprite = e.spr.attack; e.frame = 0; }
           if (!p.dead && !p.exec) sfx(DOG.rip);
           killPlayer(P.deadBlunt, e.angle);
-        } else if (!g && see && d < ENEMY.melee && e.wait <= 0 && !e.swing) {
-          // Wind up: the hit lands at the swing's middle frame (stepMafia's end).
-          e.swing = true; e.angle = dir;
-          if (e.spr.attack) { e.sprite = e.spr.attack; e.frame = 0; }
+        } else if (!g && d < ENEMY.melee && !(e.cool > 0) && !e.swing) {
+          e.swing = true; e.cool = ENEMY.swing.cool; e.angle = dir;
+          if (e.spr.attack) { e.sprite = e.spr.attack; e.frame = ENEMY.swing.start; }
           sfx(SOUND.swing[Math.floor(random(2))]);
-        }
+        } else if (e.cool > 0) e.cool--;
         if (e.wait > 0) e.wait--;
       }
       if (e.hs || e.vs) e.moveDir = pointDir(0, 0, e.hs, e.vs);
@@ -1543,11 +1548,11 @@ export async function play(env) {
     if (!e.alert && (e.hs || e.vs)) e.angle = e.moveDir;
     if (e.hs || e.vs) e.legFrame += ENEMY.legsSpeed;
     if (e.sprite === e.spr.attack) {
-      const n = frames(e.sprite), was = e.frame;
-      e.frame += g ? g.imageSpeed : MELEE.imageSpeed;
-      if (e.swing && was < n / 2 && e.frame >= n / 2) melee(e);
+      const n = frames(e.sprite);
+      if (e.swing) melee(e);
+      e.frame += g ? g.imageSpeed : ENEMY.swing.image;
       if (e.frame >= n) { e.sprite = e.spr.walk; e.frame = 0; e.swing = false; }
-    } else if (e.swing) melee(e);
+    } else if (e.swing) { melee(e); e.swing = false; }
     else e.frame += e.imageSpeed;
   }
 
@@ -1598,12 +1603,13 @@ export async function play(env) {
     e.cooldown = 0; e.wait = ENEMY.recheck;
   }
 
-  // The swing hits the player still in reach and in front of the enemy.
+  // One step of a swing: the point 8px ahead, or the enemy's own spot, in the
+  // player's mask kills a player who is not rolling.
   function melee(e) {
+    if (p.dead || p.exec || p.roll) return;
+    const at = { x: e.x + lenX(ENEMY.swing.ahead, e.angle), y: e.y + lenY(ENEMY.swing.ahead, e.angle) };
+    if (!inBox(at, p, box) && !inBox(e, p, box)) return;
     e.swing = false;
-    if (p.dead || p.exec || dist(e, p) > ENEMY.reach || !sees(e, p)) return;
-    const off = Math.abs(((pointDir(e.x, e.y, p.x, p.y) - e.angle) % 360 + 540) % 360 - 180);
-    if (off > ENEMY.front) return;
     sfx(SOUND.hit);
     killPlayer(P.deadBlunt, e.angle);
   }
