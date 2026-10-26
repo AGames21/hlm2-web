@@ -32,8 +32,9 @@ can be picked up and fired; bullets stop at walls and kill enemies outright with
 or DeadShotgun art. The mafia (objEMafiaRandom, Patrol, Static, MeleeRandom) wander on their alarm,
 spot the player, wait 15 steps, then close in and shoot, or run in with a melee weapon; a bullet or a
 melee mafia kills the player (R restarts the room). Knocked-out mafia drop the gun if the pig can use
-it. Constants are in `GUNS`, `BULLET` and `ENEMY`. Guesses: sight range, chase speed, enemy fire
-rate, the dead-sprite pose, and the melee mafia's instant kill. Rooms without a player start the pig
+it. Constants are in `GUNS`, `BULLET` and `ENEMY`. Enemies see the player only within 260px
+(0x42d8e0). Guesses: chase speed, the dead-sprite pose, and the melee swing (the hit lands at the
+attack sprite's middle frame if the player is still within 30px and in front). Rooms without a player start the pig
 near the centre, 64px clear of enemies.
 
 Step 6 is done. Once no enemy or knocked-out body is left, the room's objNextroom shows an arrow,
@@ -334,6 +335,8 @@ mask `sprMask` (24×24, origin 12,12, fully solid).
   obstacle avoider 0xd96830 (turns 18° at a time). Alarm 0 0xe8bc00: 60 + random(60) steps, direction
   random(360), speed round(random(1)), image speed speed × 0.1. The alert step 0x11a9000 re-checks
   sight every 15 steps (var 88) and switches on state var 31 (0 calm, 1–2 alert, 3 search, 4+);
+  Sight helper 0x42d8e0 (`d51t.c`): seen within 260px (160 when the global at +0xa90 is 18), the line
+  walked in 8px steps. The unarmed chaser 0xf4e710's 22px check is a weapon pickup, not a hit.
   Chase (seeing, armed): motion_add 0.25 toward the player up to speed 3 beyond 120px, brake 0.25
   within it, back off 1.5 under 32px, aim turns 10° a step. Unarmed or searching: straight at 2.5/3.
 - **Enemy fire** 0xee5fa0 (`d13t.c`): per sprite branch, counter var 65 counts down, then fires and

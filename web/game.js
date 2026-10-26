@@ -158,9 +158,13 @@ export const BULLET = { margin: 100 };
 // a 9mm or Uzi for choose(Uzi, Shotgun, 9mm); objEGangMeleeRandom (0x74b580)
 // always takes choose(Knife, Chain, Pipe, Bat). The Idle* gang and mafia
 // (create 0x748610, step 0x7488c0) are not read: they stand still here.
-// Still guesses: how sight is tested (line of sight, any range), the first-shot
-// delay, and the search after losing the player (straight at the last spot,
-// no pathfinding).
+// Sight (0x42d8e0, re-run every 15 steps from the step 0x11a9000): the
+// player is seen within 260px along a line walked in 8px steps (160px when a
+// global at +0xa90 is 18, not identified; left out). Within 22px of a weapon
+// the unarmed chaser picks it up (sndPickUpWeapon); it is not a hit.
+// Still guesses: the melee swing (a hit at the attack sprite's middle frame,
+// only if the player is still in reach and in front), the first-shot delay,
+// and the search after losing the player (straight at the last spot).
 // Sounds (sound_play 0x12c97c0 takes the sound's GML global; ids from the
 // registration run, names and volumes from hlm2_sounds.bin). Guns carry
 // their own in GUNS/ENEMY_GUNS (0x1116c70 player, 0xee5fa0 enemy branches).
@@ -210,7 +214,7 @@ export function musicFor(rooms, room) {
 
 export const ENEMY = { wanderMin: 60, wanderRand: 60, wanderAnim: 0.1, ahead: 3, recheck: 15,
   accel: 0.25, maxSpeed: 3, hold: 120, near: 32, backOff: 1.5, turn: 10,
-  chaseSpeed: 2.5, melee: 22, legsSpeed: 0.2,
+  chaseSpeed: 2.5, melee: 22, legsSpeed: 0.2, sight: 260, reach: 30, front: 60,
   guns: ['M16', 'Shotgun', 'DoubleBarrel', 'Kalashnikov'] };
 // Create-time weapon swaps: object -> [held weapon that is swapped (null:
 // always), choices].
@@ -1119,6 +1123,8 @@ export async function play(env) {
     for (let i = 1; i < n; i++) if (solidAt(a.x + (b.x - a.x) * i / n, a.y + (b.y - a.y) * i / n)) return false;
     return !doors.some(dr => blocksSight(a, b, dr));
   };
+  // An enemy sees the player only within ENEMY.sight (0x42d8e0).
+  const spots = e => !p.dead && dist(e, p) <= ENEMY.sight && sees(e, p);
   const aimDeg = () => (-p.aim / RAD + 360) % 360;
 
   // scrKnockOut: the enemy becomes a body sliding away from what hit it.
@@ -1431,7 +1437,7 @@ export async function play(env) {
     if (--e.check <= 0) {
       e.check = e.dog ? DOG.recheck : ENEMY.recheck;
       // The first shot waits one re-check (a guess at the reaction time).
-      if (!p.dead && sees(e, p)) {
+      if (spots(e)) {
         if (!e.alert) { e.wait = ENEMY.recheck; if (e.dog) sfx(DOG.bark); }
         e.alert = true; e.seen = { x: p.x, y: p.y };
       }
@@ -1449,7 +1455,7 @@ export async function play(env) {
       if (!free(sol, e.box, e.x + e.hs * ENEMY.ahead, e.y)) e.hs = -e.hs;
       if (!free(sol, e.box, e.x, e.y + e.vs * ENEMY.ahead)) e.vs = -e.vs;
     } else {
-      const see = !p.dead && sees(e, p);
+      const see = spots(e);
       if (see) e.seen = { x: p.x, y: p.y };
       const goal = e.seen, d = goal ? dist(e, goal) : 0, dir = goal ? pointDir(e.x, e.y, goal.x, goal.y) : e.angle;
       if (see && g) {
@@ -1493,11 +1499,17 @@ export async function play(env) {
           if (!(--e.repath > 0)) { e.repath = PATH.every; e.path = pathTo(e, p.x, p.y); }
           followPath(e);
         }
-        if (!g && see && d < (e.dog ? DOG.kill : ENEMY.melee)) {
+        if (e.dog && see && d < DOG.kill) {
           if (e.spr.attack && e.sprite !== e.spr.attack) { e.sprite = e.spr.attack; e.frame = 0; }
-          if (!p.dead && !p.exec) sfx(e.dog ? DOG.rip : SOUND.hit);
+          if (!p.dead && !p.exec) sfx(DOG.rip);
           killPlayer(P.deadBlunt, e.angle);
+        } else if (!g && see && d < ENEMY.melee && e.wait <= 0 && !e.swing) {
+          // Wind up: the hit lands at the swing's middle frame (stepMafia's end).
+          e.swing = true; e.angle = dir;
+          if (e.spr.attack) { e.sprite = e.spr.attack; e.frame = 0; }
+          sfx(SOUND.swing[Math.floor(random(2))]);
         }
+        if (e.wait > 0) e.wait--;
       }
       if (e.hs || e.vs) e.moveDir = pointDir(0, 0, e.hs, e.vs);
       e.imageSpeed = (e.hs || e.vs) ? ENEMY.wanderAnim * Math.hypot(e.hs, e.vs) : 0;
@@ -1519,9 +1531,22 @@ export async function play(env) {
     if (!e.alert && (e.hs || e.vs)) e.angle = e.moveDir;
     if (e.hs || e.vs) e.legFrame += ENEMY.legsSpeed;
     if (e.sprite === e.spr.attack) {
+      const n = frames(e.sprite), was = e.frame;
       e.frame += g ? g.imageSpeed : MELEE.imageSpeed;
-      if (e.frame >= frames(e.sprite)) { e.sprite = e.spr.walk; e.frame = 0; }
-    } else e.frame += e.imageSpeed;
+      if (e.swing && was < n / 2 && e.frame >= n / 2) melee(e);
+      if (e.frame >= n) { e.sprite = e.spr.walk; e.frame = 0; e.swing = false; }
+    } else if (e.swing) melee(e);
+    else e.frame += e.imageSpeed;
+  }
+
+  // The swing hits the player still in reach and in front of the enemy.
+  function melee(e) {
+    e.swing = false;
+    if (p.dead || p.exec || dist(e, p) > ENEMY.reach || !sees(e, p)) return;
+    const off = Math.abs(((pointDir(e.x, e.y, p.x, p.y) - e.angle) % 360 + 540) % 360 - 180);
+    if (off > ENEMY.front) return;
+    sfx(SOUND.hit);
+    killPlayer(P.deadBlunt, e.angle);
   }
 
   // 0x42c900: the goal is the first free point around (tx, ty), else (tx, ty).
@@ -1549,7 +1574,7 @@ export async function play(env) {
     e.frame += e.imageSpeed;
     if (e.wake > 0) { e.wake--; return; }
     e.wake = IDLE.every;
-    if (p.dead || !sees(e, p)) return;
+    if (!spots(e)) return;
     const n = Object.assign(e.idle, { x: e.x, y: e.y, angle: e.angle, alert: true, seen: { x: p.x, y: p.y }, wait: ENEMY.recheck });
     const left = IDLE.leave[e.kind];
     if (left && leaveSprite[e.kind]) dead.push({ x: e.x + left.dx, y: e.y + left.dy, angle: left.still ? 0 : e.angle, sprite: leaveSprite[e.kind], frame: 0, imageSpeed: 0 });
@@ -1572,7 +1597,7 @@ export async function play(env) {
       e.frame += e.imageSpeed;
       if (--e.wake > 0) return;
       e.wake = DODGER.wake;
-      if (p.dead || !sees(e, p)) return;
+      if (!spots(e)) return;
       Object.assign(e, { sleep: false, alert: true, seen: { x: p.x, y: p.y }, sprite: e.spr.walk, frame: 0, imageSpeed: 0, angle: pointDir(e.x, e.y, p.x, p.y) });
     }
     stepMafia(e);
@@ -1584,7 +1609,7 @@ export async function play(env) {
       if (--e.reloading <= 0 || (e.spr.reload && e.frame >= frames(e.spr.reload))) Object.assign(e, { reloading: 0, sprite: e.spr.idle, frame: HIDE.up, ammo: HIDE.ammo });
       return;
     }
-    if (--e.check <= 0) { e.check = HIDE.every; e.alert = !p.dead && sees(e, p); }
+    if (--e.check <= 0) { e.check = HIDE.every; e.alert = spots(e); }
     if (!e.alert) { e.frame = Math.max(0, e.frame - HIDE.rise); return; }
     e.angle = pointDir(e.x, e.y, p.x, p.y);
     if (e.frame < HIDE.up) { e.frame = Math.min(HIDE.up, e.frame + HIDE.rise); return; }
