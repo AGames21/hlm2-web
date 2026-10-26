@@ -90,6 +90,10 @@ export const ARMS = { Bat: { frame: 4 }, Hammer: { frame: 3 }, Stick: { frame: 3
 // (by var 23 * 90 degrees) and only fires from its walk sprite. When the muzzle
 // is inside a wall the exe hits what is in front directly instead.
 // The double barrel's alternating barrel (var 23, Attack1/Attack2) is a guess.
+// Guns hung on a wall (objShotgunWall, no parent): the create 0xb99bb0 sets
+// the ammo to 2 and the draw 0x9b1690 is a shadow plus the sprite; it has no
+// step, so the player's pickup takes it like a loose gun of that kind.
+export const WALL_GUNS = { objShotgunWall: { name: 'Shotgun', ammo: 2 } };
 export const GUNS = {
   '9mm': { ammo: 15, imageSpeed: 0.5, cooldown: 14, shake: 6, pellets: 1, spread: 6, speed: 12, speedRand: 4, muzzle: 26, sound: 'snd9mm' },
   Shotgun: { ammo: 6, imageSpeed: 0.5, cooldown: 30, shake: 6, pellets: 8, spread: 6, speed: 12, speedRand: 4, muzzle: 26, sound: 'sndShotgun' },
@@ -510,8 +514,26 @@ export const CAMERA = { lead: 0.5, max: 22, ease: 0.15 };
 export const NIGHT = {
   room: /^rmTutorialFloor1$/, top: [44, 0, 0], bottom: [16, 0, 0], tint: 'rgb(222,204,189)',
   glow: { r: 110, colour: [120, 40, 40], a: 0.35 },
-  hint: { text: 0, door: 1, near: 96, font: 'fntLabel', scale: 1.15, track: 0, padX: 7, top: 245, h: 14, box: '#000', shadow: 'rgb(3,124,124)', a: [255, 135, 255], b: [255, 240, 255], flash: 12, pop: 18, popScale: 0.09, exec: 2, look: 3, swing: 5, throw: 6, swap: 120, pickup: 4, pickupNear: 48, pickupWeapon: 'Hammer' },
+  hint: { text: 0, door: 1, near: 96, font: 'fntLabel', scale: 1.15, track: 0, padX: 7, top: 245, h: 14, box: '#000', shadow: 'rgb(3,124,124)', a: [255, 135, 255], b: [255, 240, 255], flash: 12, pop: 18, popScale: 0.09, exec: 2, look: 3, swing: 5, throw: 6, swap: 120, pickup: 4, pickupNear: 48, pickupWeapon: 'Hammer',
+    // Later on the night, as the native game showed them: text 7 from the second
+    // kill, 8 once the floor is clear (go to the phone), 9 after the phone talk.
+    second: 7, clear: 8, after: 9,
+    // native draws the [SCROLL WHEEL] key of texts 11 and 17 shorter
+    key: [/\[SCROLL WHEEL\]/, '[SCROLL]'] },
 };
+// The same hint box upstairs (rmTutorialFloor2), seen in the native game; this
+// floor is lit normally and keeps the HUD. Text 15 until the wall shotgun is
+// held, then 17 and 16 (lock-on, aim) swapping every `swap` steps, 18 (shoot)
+// from the first lock-on. It hides inside the couple's bedroom (`bedroom`, read
+// off screenshots) until only the woman is left, when text 19 shows.
+export const FLOOR2_HINT = { room: /^rmTutorialFloor2$/, gun: 15, lock: 17, aim: 16, shoot: 18, finish: 19, finishObj: 'objVictim5',
+  bedroom: { l: 306, t: 40, r: 511, b: 226 } };
+// Native locks on with the middle button or the scroll wheel; a trackpad's
+// scroll sends a burst of wheel events, so one toggle per `wheelGap` ms.
+export const LOCK_INPUT = { wheelGap: 300 };
+// Phones (objPigPhone and the like) wait for a click near them; other talkers
+// start when the player comes near.
+export const PHONES = /Phone/;
 // The death prompt (text 3050, its [R] shown as R), measured off the native Pilot:
 // a black box left of centre just above the hint, the text fading cyan to magenta.
 // GUESS: the same spot in rooms with no hint, and the fade's speed.
@@ -905,13 +927,13 @@ export async function play(env) {
   const wbox = maskBox(G, { mask: sprByName.get('sprWeaponMask')?.id ?? -1, sprite: -1 });
   const weapons = saved ? saved.weapons.filter(w => need(w.sprite)).map(w => ({ ...w })) : room.insts.filter(i => {
     const o = G.objects.get(i.obj);
-    return o && inherits(G, o, 'objWeapon') && arm[o.name.slice(3)];
+    return o && (inherits(G, o, 'objWeapon') ? arm[o.name.slice(3)] : arm[WALL_GUNS[o.name]?.name]);
   }).map(i => {
-    const name = G.objects.get(i.obj).name.slice(3);
-    return { inst: i, name, x: i.x, y: i.y, angle: 0, speed: 0, dir: 0, ammo: GUNS[name]?.ammo ?? 0,
-      sprite: need(G.sprites.get(G.objects.get(i.obj).sprite).name) };
+    const o = G.objects.get(i.obj), wall = WALL_GUNS[o.name], name = wall ? wall.name : o.name.slice(3);
+    return { inst: i, name, x: i.x, y: i.y, angle: 0, speed: 0, dir: 0, ammo: wall ? wall.ammo : GUNS[name]?.ammo ?? 0,
+      wall: !!wall, sprite: need(G.sprites.get(G.objects.get(i.obj).sprite).name) };
   });
-  const looseSprite = Object.fromEntries(weapons.map(w => [w.name, w.sprite]));
+  const looseSprite = Object.fromEntries(weapons.filter(w => !w.wall).map(w => [w.name, w.sprite]));
   for (const name of Object.keys(arm)) looseSprite[name] ??= need('spr' + name);
 
   // Doors: the create event moves V doors 4px right; H doors are taken to
@@ -1016,6 +1038,9 @@ export async function play(env) {
     const t = talks[0];
     if (film && !film.arrived) return;
     if (talkClock < TALK.startDelay || t.at && !t.at.some(a => Math.hypot(p.x - a.x, p.y - a.y) <= TALK.reach)) return;
+    const phone = t.at?.some(a => PHONES.test(G.objects.get(a.obj).name));
+    if (phone && !mouse.click && !mouse.right) return;
+    if (phone) { mouse.click = mouse.right = false; if (hint) hint.talked = true; }
     talks.shift();
     env.cutscene = conversation(G, t.pages, { drawFace });
   }
@@ -1118,8 +1143,8 @@ export async function play(env) {
   const keys = new Set(), pressed = new Set();
   const mouse = { x: VIEW_W / 2, y: VIEW_H / 2, click: false, right: false };
   const cam = { x: 0, y: 0, shake: 0 };
-  const night = NIGHT.room.test(room.name);
-  const hint = night && G.text?.[NIGHT.hint.text] ? { font: await loadFont(G, NIGHT.hint.font) } : null;
+  const night = NIGHT.room.test(room.name), floor2 = FLOOR2_HINT.room.test(room.name);
+  const hint = (night || floor2) && G.text?.[NIGHT.hint.text] ? { font: await loadFont(G, NIGHT.hint.font), kills: stats.kills } : null;
   const restartFont = G.text?.[RESTART.text] ? await loadFont(G, RESTART.font) : null;
   const onKey = (e) => {
     if (env.paused?.()) return;
@@ -1139,6 +1164,14 @@ export async function play(env) {
     // Ctrl+click is a Mac trackpad's right click.
     if (e.type === 'mousedown' && e.button === 0 && !e.ctrlKey) mouse.click = true;
     if (e.type === 'mousedown' && (e.button === 2 || (e.button === 0 && e.ctrlKey))) mouse.right = true;
+    if (e.type === 'mousedown' && e.button === 1) { e.preventDefault(); pressed.add('q'); }
+  };
+  let wheelAt = -Infinity;
+  const onWheel = (e) => {
+    if (env.paused?.()) return;
+    e.preventDefault();
+    if (e.timeStamp - wheelAt > LOCK_INPUT.wheelGap) pressed.add('q');
+    wheelAt = e.timeStamp;
   };
   const noMenu = (e) => e.preventDefault();
   const clearInput = () => { keys.clear(); pressed.clear(); mouse.click = mouse.right = false; p.hs = p.vs = 0; };
@@ -1150,6 +1183,7 @@ export async function play(env) {
   canvas.addEventListener('mousemove', onMouse);
   canvas.addEventListener('mousedown', onMouse);
   canvas.addEventListener('contextmenu', noMenu);
+  canvas.addEventListener('wheel', onWheel, { passive: false });
 
   canvas.width = VIEW_W;
   canvas.height = VIEW_H;
@@ -2047,6 +2081,7 @@ export async function play(env) {
       const d = Math.hypot(sx - mouse.x, sy - mouse.y);
       if (d < best) { best = d; lock = e; }
     }
+    if (lock && hint) hint.locked = true;
   }
 
   function stepFilm() {
@@ -2094,21 +2129,37 @@ export async function play(env) {
     const ex = Math.min(img.width, cam.x + VIEW_W), ey = Math.min(img.height, cam.y + VIEW_H);
     if (ex > sx && ey > sy) cx.drawImage(img, sx, sy, ex - sx, ey - sy, sx - cam.x, sy - cam.y, ex - sx, ey - sy);
   }
+  function hint2() {
+    const h = FLOOR2_HINT, name = e => G.objects.get(e.obj)?.name, left = [...enemies, ...kos];
+    if (left.length && left.every(e => name(e) === h.finishObj)) return h.finish;
+    const b = h.bedroom;
+    if (p.x > b.l && p.x < b.r && p.y > b.t && p.y < b.b) return null;
+    if (hint.locked) return h.shoot;
+    if (!held()?.gun) return h.gun;
+    if (hint.held == null) hint.held = frameClock;
+    return (frameClock - hint.held) / NIGHT.hint.swap & 1 ? h.aim : h.lock;
+  }
   function drawHint() {
+    if (env.cutscene && !env.cutscene.done) return;
     const h = NIGHT.hint, f = hint.font;
     const atDoor = doors.some(d => Math.hypot(d.x - p.x, d.y - p.y) < h.near);
     // Native order: walk (door hint near a door), execute while someone is knocked out, then look around after the first execute.
     if (!hint.stage && kos.length) hint.stage = 1;
     // Holding a melee weapon beats all of that: throw, then swing, swapping every 2 seconds.
     const melee = held() && !held().gun;
-    if (!melee) hint.held = null; else if (hint.held == null) hint.held = frameClock;
+    // (Upstairs, hint2 keeps this clock for the gun lines instead.)
+    if (!floor2) { if (!melee) hint.held = null; else if (hint.held == null) hint.held = frameClock; }
     // The pick-up line names the hammer, so it shows near a loose hammer once no one is left knocked out.
     // GUESS: the 48px range (native showed it a little outside pickup reach).
     const nearPickup = weapons.some(w => w.name === h.pickupWeapon && w.speed === 0 && Math.hypot(w.x - p.x, w.y - p.y) < h.pickupNear);
-    const id = melee ? ((frameClock - hint.held) / h.swap & 1 ? h.swing : h.throw)
+    const clear = !enemies.some(e => e.isEnemy) && !kos.length;
+    const id = floor2 ? hint2() : hint.talked ? h.after : clear ? h.clear
+      : melee ? ((frameClock - hint.held) / h.swap & 1 ? h.swing : h.throw)
       : kos.length && hint.stage === 1 ? h.exec : nearPickup ? h.pickup
+      : stats.kills - hint.kills >= 2 ? h.second
       : hint.stage === 2 ? h.look : atDoor && G.text[h.door] ? h.door : h.text;
-    const chars = [...G.text[id]];
+    if (id == null || !G.text[id]) { hint.id = null; return; }
+    const chars = [...G.text[id].replace(...h.key)];
     // native flashes the box red, with white text, for a moment whenever the hint changes
     // and pops the text up a little bigger, shrinking back over 0.3 seconds
     if (hint.id !== id) { hint.id = id; hint.flash = h.flash; hint.pop = h.pop; }
@@ -2138,6 +2189,7 @@ export async function play(env) {
   function hud() {
     if (p.dead && restartFont && env.restart) drawRestart();
     if (night) { if (hint) drawHint(); return; }
+    if (hint) drawHint();
     cx.save();
     cx.font = 'bold 10px monospace';
     cx.textAlign = 'center';
@@ -2313,6 +2365,7 @@ export async function play(env) {
       canvas.removeEventListener('mousemove', onMouse);
       canvas.removeEventListener('mousedown', onMouse);
       canvas.removeEventListener('contextmenu', noMenu);
+      canvas.removeEventListener('wheel', onWheel);
     },
   };
   return handle;
