@@ -14,6 +14,9 @@ const path = require('node:path');
 const FROM = +(process.env.FROM || 0), STOP = process.env.STOP || ''; // STOP: a scene label such as '3RD SCENE'
 const OUT = process.env.OUT || path.join(process.env.TEMP || '/tmp', 'hlm2-fullrun');
 const MINUTES = +(process.env.MINUTES || 90);
+// TRACKPAD=1 plays as a trackpad player would: rough aim, then the lock-on and
+// attack keys instead of exact aim and clicks.
+const TRACKPAD = process.env.TRACKPAD === '1';
 
 // Runs in the page. window.__bot drives one game handle at a time.
 function installBot() {
@@ -196,12 +199,20 @@ function installBot() {
     if (!t) return;
     if (B.target?.ref !== t.ref) { B.target = t; B.best = Infinity; B.since = 0; }
     const d = Math.hypot(t.x - p.x, t.y - p.y);
-    p.aim = Math.atan2(t.y - p.y, t.x - p.x);
-    mouse.x = t.x - g.cam.x; mouse.y = t.y - g.cam.y;
     const fighting = t.kind === 'enemy' || t.kind === 'boss' || t.kind === 'other';
     const gun = p.ammo > 0;
-    if (fighting && !(p.cooldown > 0) && !p.attack) {
-      if (d < 30 || (gun && d < 260 && clearLine(g.solids, p, t))) mouse.click = true;
+    if (B.trackpad) {
+      // Point roughly (up to 40 px off), lock on to the nearest enemy, attack with the key.
+      if (!g.lock) { const j = (B.cur.steps >> 5) * 2.399; mouse.x = t.x - g.cam.x + Math.cos(j) * 40; mouse.y = t.y - g.cam.y + Math.sin(j) * 40; }
+      if (fighting && t.kind === 'enemy' && g.lock !== t.ref && B.cur.steps % 6 === 0) g.pressed.add('q');
+      const aimed = g.lock || t;
+      if (fighting && !(p.cooldown > 0) && !p.attack && (d < 30 || (gun && d < 260 && clearLine(g.solids, p, aimed)))) g.pressed.add('f');
+    } else {
+      p.aim = Math.atan2(t.y - p.y, t.x - p.x);
+      mouse.x = t.x - g.cam.x; mouse.y = t.y - g.cam.y;
+      if (fighting && !(p.cooldown > 0) && !p.attack) {
+        if (d < 30 || (gun && d < 260 && clearLine(g.solids, p, t))) mouse.click = true;
+      }
     }
     if (t.kind === 'ko' && d < 8) g.pressed.add(' ');
     // Track hits that never land.
@@ -325,6 +336,7 @@ function installBot() {
     await page.goto(base + '/');
     await page.waitForFunction(() => window.G && window.runScene, null, { timeout: 120000 });
     await page.evaluate(installBot);
+    if (TRACKPAD) await page.evaluate(() => { window.__bot.trackpad = true; });
     await page.evaluate(i => { history.replaceState(null, '', '#bot'); window.runScene(i); }, FROM);
     const t0 = Date.now();
     let lastRoom = null, shots = 0, quiet = 0;

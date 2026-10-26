@@ -650,13 +650,29 @@ function nearestFree(sol, box, x, y, ok = () => true) {
 }
 
 // Move along one axis; when blocked, creep up to the wall a pixel at a time.
-function moveAxis(sol, box, p, axis, v) {
+// With `corner`, a mover clipping the edge of a doorway or wall end slides
+// sideways toward the clear lane up to that many px away instead of sticking.
+// A port choice: a 24px box has only 4px either side in a 32px doorway.
+export const CORNER = 10;
+function moveAxis(sol, box, p, axis, v, corner = 0) {
   const at = (d) => axis === 'x' ? free(sol, box, p.x + d, p.y) : free(sol, box, p.x, p.y + d);
   if (at(v)) { p[axis] += v; return v; }
   const s = Math.sign(v);
   let moved = 0;
   while (Math.abs(moved + s) <= Math.abs(v) && at(moved + s)) moved += s;
   p[axis] += moved;
+  if (corner && s) {
+    const o = axis === 'x' ? 'y' : 'x';
+    // Never more than half the mover's width, so a head-on hit still blocks.
+    corner = Math.min(corner, Math.floor((axis === 'x' ? box.b - box.t : box.r - box.l) / 2));
+    const fits = (k, d) => axis === 'x' ? free(sol, box, p.x + d, p.y + k) : free(sol, box, p.x + k, p.y + d);
+    for (let k = 1; k <= corner; k++)
+      for (const side of [-1, 1]) {
+        let ok = true;
+        for (let j = 1; j <= k && ok; j++) ok = fits(side * j, 0);
+        if (ok && fits(side * k, s)) { p[o] += side * Math.min(k, Math.abs(v)); return v; }
+      }
+  }
   return 0;
 }
 
@@ -1094,7 +1110,7 @@ export async function play(env) {
     if (env.paused?.()) return;
     if (e.type === 'keydown' && (e.target.closest?.('input, select, textarea, button') || e.target.isContentEditable)) return;
     const k = gameKey(e.key);
-    if (!['w', 'a', 's', 'd', ' ', 'r', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) return;
+    if (!['w', 'a', 's', 'd', ' ', 'r', 'f', 'e', 'q', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) return;
     e.preventDefault();
     if (e.type === 'keydown' && !e.repeat) pressed.add(k);
     e.type === 'keydown' ? keys.add(k) : keys.delete(k);
@@ -1105,8 +1121,9 @@ export async function play(env) {
     const r = canvas.getBoundingClientRect();
     mouse.x = (e.clientX - r.left) * VIEW_W / r.width;
     mouse.y = (e.clientY - r.top) * VIEW_H / r.height;
-    if (e.type === 'mousedown' && e.button === 0) mouse.click = true;
-    if (e.type === 'mousedown' && e.button === 2) mouse.right = true;
+    // Ctrl+click is a Mac trackpad's right click.
+    if (e.type === 'mousedown' && e.button === 0 && !e.ctrlKey) mouse.click = true;
+    if (e.type === 'mousedown' && (e.button === 2 || (e.button === 0 && e.ctrlKey))) mouse.right = true;
   };
   const noMenu = (e) => e.preventDefault();
   const clearInput = () => { keys.clear(); pressed.clear(); mouse.click = mouse.right = false; p.hs = p.vs = 0; };
@@ -1388,8 +1405,8 @@ export async function play(env) {
     p.hs = ix ? approach(p.hs, ix * MOVE.maxSpeed, MOVE.accel) : approach(p.hs, 0, MOVE.friction);
     p.vs = iy ? approach(p.vs, iy * MOVE.maxSpeed, MOVE.accel) : approach(p.vs, 0, MOVE.friction);
     while (Math.abs(p.hs) + Math.abs(p.vs) > MOVE.maxSpeed + MOVE.diagSlack) { p.hs *= MOVE.diagScale; p.vs *= MOVE.diagScale; }
-    p.hs = moveAxis(sol, box, p, 'x', p.hs);
-    p.vs = moveAxis(sol, box, p, 'y', p.vs);
+    p.hs = moveAxis(sol, box, p, 'x', p.hs, CORNER);
+    p.vs = moveAxis(sol, box, p, 'y', p.vs, CORNER);
     if (p.hs || p.vs) { p.dir = Math.atan2(p.vs, p.hs); p.frame += MOVE.animSpeed; }
 
     if (p.cooldown > 0) p.cooldown--;
@@ -1552,11 +1569,11 @@ export async function play(env) {
     // freely, to get out.
     if (e.path && !free(sol, e.box, e.x, e.y)) { e.x += e.hs; e.y += e.vs; }
     else if (e.path) {
-      const mx = moveAxis(sol, e.box, e, 'x', e.hs), my = moveAxis(sol, e.box, e, 'y', e.vs);
+      const mx = moveAxis(sol, e.box, e, 'x', e.hs, CORNER), my = moveAxis(sol, e.box, e, 'y', e.vs, CORNER);
       if (!mx && !my) e.repath = 0;
     } else {
-      if (!moveAxis(sol, e.box, e, 'x', e.hs) && e.alert) e.hs = 0;
-      if (!moveAxis(sol, e.box, e, 'y', e.vs) && e.alert) e.vs = 0;
+      if (!moveAxis(sol, e.box, e, 'x', e.hs, CORNER) && e.alert) e.hs = 0;
+      if (!moveAxis(sol, e.box, e, 'y', e.vs, CORNER) && e.alert) e.vs = 0;
     }
     if (!e.alert && (e.hs || e.vs)) e.angle = e.moveDir;
     if (e.hs || e.vs) e.legFrame += ENEMY.legsSpeed;
@@ -1717,8 +1734,8 @@ export async function play(env) {
       const goal = door ? { x: door.x, y: door.y + VICTIM1.targetDy } : { x: 2 * e.x - p.x, y: 2 * e.y - p.y };
       if (dist(e, goal) <= VICTIM1.speed) { e.sprite = e.spr.idle; e.imageSpeed = VICTIM1.idleSpeed; return; }
       const dir = pointDir(e.x, e.y, goal.x, goal.y);
-      moveAxis(sol, e.box, e, 'x', lenX(VICTIM1.speed, dir));
-      moveAxis(sol, e.box, e, 'y', lenY(VICTIM1.speed, dir));
+      moveAxis(sol, e.box, e, 'x', lenX(VICTIM1.speed, dir), CORNER);
+      moveAxis(sol, e.box, e, 'y', lenY(VICTIM1.speed, dir), CORNER);
       if (e.sprite !== e.spr.walk) e.frame = 0;
       e.sprite = e.spr.walk; e.imageSpeed = VICTIM1.walkSpeed; e.angle = dir;
     } else {
@@ -1949,6 +1966,10 @@ export async function play(env) {
 
   function step() {
     if (env.paused?.()) { keys.clear(); pressed.clear(); mouse.click = mouse.right = false; return; }
+    // Keyboard stand-ins for the mouse buttons (see defaultBindings).
+    if (pressed.has('f')) mouse.click = true;
+    if (pressed.has('e')) mouse.right = true;
+    if (pressed.has('q')) lockOn();
     // A cutscene (dialogue box) holds the room still and eats the input.
     stepTalk();
     if (card) { if (card.hold > 0) card.hold--; else if ((card.alpha -= DATE_CARD.fade) <= 0) card = null; }
@@ -1990,7 +2011,24 @@ export async function play(env) {
     // The shake's decay rate is a guess.
     cam.shake = Math.max(0, cam.shake - 0.2);
     moveCamera(CAMERA.ease);
+    // A locked target holds the cursor on it.
+    if (lock && !enemies.includes(lock)) lock = null;
+    if (lock) { mouse.x = lock.x - cam.x; mouse.y = lock.y - cam.y; }
     p.aim = Math.atan2(mouse.y + cam.y - p.y, mouse.x + cam.x - p.x);
+  }
+
+  // Lock on to the on-screen enemy nearest the cursor; pressed again, let go.
+  // The port's version of the native lock-on, for trackpad aiming.
+  let lock = null;
+  function lockOn() {
+    if (lock) { lock = null; return; }
+    let best = Infinity;
+    for (const e of enemies) {
+      const sx = e.x - cam.x, sy = e.y - cam.y;
+      if (sx < 0 || sy < 0 || sx > VIEW_W || sy > VIEW_H) continue;
+      const d = Math.hypot(sx - mouse.x, sy - mouse.y);
+      if (d < best) { best = d; lock = e; }
+    }
   }
 
   function stepFilm() {
@@ -2193,12 +2231,14 @@ export async function play(env) {
   moveCamera(1);
   if (env.autostart !== false) next();
   canvas.focus?.({ preventScroll: true });
-  env.status(`Playing ${room.name} as ${pobj.name}: use your movement keys or arrows, mouse to aim, left click to attack, right click to pick up or throw. Change keys in Settings. Esc or Stop to leave.`);
+  const keyLabel = name => options.bindings[name] === ' ' ? 'Space' : options.bindings[name].toUpperCase();
+  env.status(`Playing ${room.name} as ${pobj.name}: use your movement keys or arrows, mouse to aim, left click (or ${keyLabel('attack')}) to attack, right click (or ${keyLabel('grab')}) to pick up or throw, ${keyLabel('lock')} to lock on. Change keys in Settings. Esc or Stop to leave.`);
 
   // Handle for tests and for stopping.
   const handle = {
     room: room.name, stats, cam, splats, gore, player: p, keys, pressed, mouse, solids: sol, box, enemies, bosses, kos, dead, doors, weapons, bullets, exits, elevators, talks, talkers, step, draw, leave,
     left: false, talking: () => !!env.cutscene && !env.cutscene.done,
+    get lock() { return lock; },
     diagnostics() {
       return {
         room: room.name, character: pobj.name, running, paused: !!env.paused?.(),

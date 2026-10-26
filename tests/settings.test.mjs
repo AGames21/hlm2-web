@@ -21,7 +21,7 @@ test('Invalid saved values cannot break volume, scaling, or keyboard controls', 
 });
 
 test('Rebound keys trigger the correct simulation actions and keep arrow movement', () => {
-  const bindings = { up: 'i', down: 'k', left: 'j', right: 'l', execute: 'e', restart: 't' };
+  const bindings = { up: 'i', down: 'k', left: 'j', right: 'l', execute: 'e', restart: 't', attack: 'f', grab: 'g', lock: 'q' };
   assert.deepEqual(normalizeSettings({ bindings }).bindings, bindings);
   for (const [key, action] of [['I', 'w'], ['k', 's'], ['j', 'a'], ['l', 'd'], ['e', ' '], ['t', 'r'], ['ArrowUp', 'w']]) assert.equal(gameKey(key, bindings), action);
   assert.equal(gameKey('w', bindings), null);
@@ -32,4 +32,15 @@ test('Rebound keys trigger the correct simulation actions and keep arrow movemen
 test('Conflicting saved key bindings fall back to usable defaults', () => {
   const bindings = { ...defaultBindings, up: 's' };
   assert.deepEqual(normalizeSettings({ bindings }).bindings, defaultBindings);
+});
+
+test('Saves from before the trackpad keys gain them without clashes', () => {
+  const old = { up: 'i', down: 'k', left: 'j', right: 'l', execute: 'e', restart: 't' };
+  const b = normalizeSettings({ bindings: old }).bindings;
+  for (const name of Object.keys(old)) assert.equal(b[name], old[name]);
+  assert.equal(b.attack, 'f'); assert.equal(b.lock, 'q');
+  assert.notEqual(b.grab, 'e');
+  assert.equal(new Set(Object.values(b)).size, Object.keys(defaultBindings).length);
+  assert.equal(gameKey('f', b), 'f');
+  assert.equal(gameKey('Q', defaultBindings), 'q');
 });

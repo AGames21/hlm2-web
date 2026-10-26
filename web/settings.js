@@ -1,4 +1,7 @@
-export const defaultBindings = { up: 'w', down: 's', left: 'a', right: 'd', execute: ' ', restart: 'r' };
+// attack, grab and lock let a trackpad player fight from the keyboard: many
+// trackpads ignore taps while keys are held.
+export const defaultBindings = { up: 'w', down: 's', left: 'a', right: 'd', execute: ' ', restart: 'r', attack: 'f', grab: 'e', lock: 'q' };
+const spareKeys = 'fqegzxcvtyuiophjklbnm1234567890';
 export const defaultSettings = { music: true, musicVolume: 70, effectsVolume: 100, shake: true, zoom: 0, censor: false };
 const storageKey = 'hlm2-web-options';
 
@@ -9,8 +12,16 @@ export function normalizeSettings(value = {}) {
   for (const name of ['musicVolume', 'effectsVolume']) if (Number.isFinite(input[name])) out[name] = Math.max(0, Math.min(100, input[name]));
   // 0 fits the game to the window.
   if ([0, 1, 2, 3, 4].includes(input.zoom)) out.zoom = input.zoom;
-  if (input.bindings && Object.keys(defaultBindings).every(name => validKey(input.bindings[name])) && new Set(Object.values(input.bindings)).size === 6) {
-    for (const name of Object.keys(defaultBindings)) out.bindings[name] = input.bindings[name];
+  // Saves from before an action existed keep their keys; the new action takes
+  // its default, or the first spare key when that one is already in use.
+  const saved = input.bindings && typeof input.bindings === 'object' ? input.bindings : null;
+  const kept = saved && Object.keys(defaultBindings).filter(name => name in saved);
+  if (kept?.length && kept.every(name => validKey(saved[name])) && new Set(kept.map(name => saved[name])).size === kept.length) {
+    const taken = new Set(kept.map(name => saved[name]));
+    for (const name of kept) out.bindings[name] = saved[name];
+    const clash = Object.keys(defaultBindings).filter(name => !kept.includes(name) && taken.has(defaultBindings[name]));
+    for (const name of Object.keys(defaultBindings)) if (!kept.includes(name) && !clash.includes(name)) taken.add(defaultBindings[name]);
+    for (const name of clash) { const key = [...spareKeys].find(k => !taken.has(k)); out.bindings[name] = key; taken.add(key); }
   }
   return out;
 }
@@ -35,7 +46,7 @@ export function gameKey(key, bindings = options.bindings) {
 export function setupSettings(dialog, onChange, toggleFullscreen, onClose = () => {}) {
   const $ = id => document.getElementById(id);
   let binding = null;
-  const labels = { up: 'Move up', down: 'Move down', left: 'Move left', right: 'Move right', execute: 'Execute', restart: 'Restart room' };
+  const labels = { up: 'Move up', down: 'Move down', left: 'Move left', right: 'Move right', execute: 'Execute', restart: 'Restart room', attack: 'Attack', grab: 'Pick up / throw', lock: 'Lock on' };
   const keyName = key => key === ' ' ? 'SPACE' : key.toUpperCase();
   function drawBindings() {
     $('key-bindings').replaceChildren(...Object.entries(labels).map(([name, label]) => {
