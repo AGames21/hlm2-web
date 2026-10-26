@@ -474,20 +474,28 @@ function tinted(s, i, colour) {
   return m.get(id);
 }
 async function chapters(G, cx, canvas, startAct) {
-  const names = ['sprCityScape', 'sprCitySun', 'sprCloudsSmoke', 'sprMusicCassette', 'sprScanlines', 'sprNoise', ...new Set(ACTS.flatMap(a => [a.item, a.covers].filter(Boolean)))];
+  const names = ['sprCityScape', 'sprCitySun', 'sprCloudsSmoke', 'sprMusicCassette', 'sprMidnightOpen', 'sprAct1CoverOpen', 'sprAct1VHSTape', 'sprScanlines', 'sprNoise', ...new Set(ACTS.flatMap(a => [a.item, a.covers].filter(Boolean)))];
   const [s, fonts] = await Promise.all([sprites(G, names),
     Promise.all(['fntVHSTitle', 'fntVHSSubtitle', 'fntVHSStats', 'fntVHSGrading', 'fntVHSMusic'].map(n => loadFont(G, n)))]);
   const [fTitle, fLabel, fStats, fGrading, fMusic] = fonts;
   const reached = i => i <= progress.get();
   const open = i => reached(ACTS[i].scenes[0]);
   const text = (id, or) => G.text?.[id] || or;
+  // ask: on a scene already cleared, the open tape asks to skip the intro
+  // (0 yes, 1 no, -1 not asking).
   // view: the carousel position; pick: -1 browsing acts, else the scene
   // shown (Enter); pull: 0..1 how far the box has moved aside for it.
-  let act = Math.max(0, Math.min(startAct, ACTS.length - 1)), view = act, slide = 0, pick = -1, pull = 0, picked = 0;
+  let act = Math.max(0, Math.min(startAct, ACTS.length - 1)), view = act, slide = 0, pick = -1, pull = 0, picked = 0, ask = -1, asked = 0;
   return loop(canvas, (t, ev) => {
     const tt = t / 60, a = ACTS[act], list = a.scenes.filter(reached);
     for (const e of ev) {
       const turn = e.k === 'left' || e.k === 'up' ? -1 : e.k === 'right' || e.k === 'down' ? 1 : e.k === 'click' && (e.x < 120 || e.x > 360) ? (e.x < 240 ? -1 : 1) : 0;
+      if (ask >= 0) {
+        if (turn) { ask ^= 1; G.audio.play?.('sndMenuMove'); }
+        else if (e.k === 'ok' || e.k === 'click') { G.audio.play?.('sndMenuSelect'); return { action: 'story', scene: list[pick], skip: ask === 0 }; }
+        else if (e.k === 'back') ask = -1;
+        continue;
+      }
       if (pick < 0) {
         if (turn) {
           // Only reached acts are in the carousel; it wraps.
@@ -498,7 +506,11 @@ async function chapters(G, cx, canvas, startAct) {
         else if (e.k === 'back') return { action: 'back' };
       } else {
         if (turn && list.length > 1) { pick = (pick + turn + list.length) % list.length; slide = turn; picked = t; G.audio.play?.('sndMenuMove'); }
-        else if (e.k === 'ok' || e.k === 'click') { G.audio.play?.('sndMenuSelect'); return { action: 'story', scene: list[pick] }; }
+        else if (e.k === 'ok' || e.k === 'click') {
+          G.audio.play?.('sndMenuSelect');
+          if (list[pick] >= progress.get()) return { action: 'story', scene: list[pick] };
+          ask = 1; asked = t;
+        }
         else if (e.k === 'back') pick = -1;
       }
     }
@@ -515,7 +527,7 @@ async function chapters(G, cx, canvas, startAct) {
     const sky = cx.createLinearGradient(0, 0, W, 0);
     sky.addColorStop(0, '#f2584a'); sky.addColorStop(0.55, '#d8303f'); sky.addColorStop(1, '#a0142f');
     cx.fillStyle = sky; cx.fillRect(0, 0, W, ROOM_H);
-    const glow = cx.createRadialGradient(10, 10, 0, 10, 10, 330);
+    const glow = cx.createRadialGradient(30, 40, 0, 30, 40, 360);
     glow.addColorStop(0, 'rgba(255,225,150,1)'); glow.addColorStop(0.4, 'rgba(255,150,90,0.7)'); glow.addColorStop(1, 'rgba(255,80,90,0)');
     cx.fillStyle = glow; cx.fillRect(0, 0, W, ROOM_H);
     if (s.sprCloudsSmoke) {
@@ -540,6 +552,20 @@ async function chapters(G, cx, canvas, startAct) {
     cx.fillStyle = ground; cx.fillRect(0, 150, W, ROOM_H - 150);
     cx.fillStyle = 'rgba(60,0,20,0.35)';
     for (let k = 0; k < 7; k++) cx.fillRect(0, 152 + k * k * 1.1, W, 1);
+    if (ask >= 0) {
+      // The tape case opened in the middle, and Yes / No under it.
+      const k = Math.min(1, (t - asked) / 12), y = 92 + (1 - k) * 30;
+      stack(cx, pilot ? s.sprMidnightOpen : s.sprAct1CoverOpen, W / 2, y, 0, { step: 0.8, scale: 1.2 });
+      stack(cx, s.sprAct1VHSTape, W / 2 + 12, y, 0, { step: 0.8, scale: 1.2 });
+      const q = text(3071, 'Skip Intro?'), lc = css(merge([52, 214, 180], [255, 90, 170], wave(1.2, tt)));
+      drawText(cx, fLabel, q, W / 2 + 1, 7, { align: 0.5, colour: '#40001a' });
+      drawText(cx, fLabel, q, W / 2, 6, { align: 0.5, colour: lc });
+      [[3072, 'Yes', -40], [3073, 'No', 46]].forEach(([id, or, dx], n) => {
+        const on = n === ask, str = text(id, or), x = W / 2 + dx + (1 - k) * dx * 3, y = 156 - fTitle.line * 0.45;
+        for (let d = 4; d > 0; d--) drawText(cx, fTitle, str, x + d * 0.6, y + d, { align: 0.5, colour: on ? (d > 2 ? '#3a0016' : '#ff3d8b') : '#4a0018', scale: 0.9 });
+        drawText(cx, fTitle, str, x, y, { align: 0.5, colour: on ? '#3fe0b5' : css(merge([120, 10, 40], [200, 30, 70], wave(3, tt))), scale: 0.9 });
+      });
+    } else {
     // The carousel. Picking the pilot pulls its tape forward and the rest
     // away; picking an act moves its box left and a scene cover slides out.
     ACTS.forEach((b, i) => {
@@ -593,6 +619,7 @@ async function chapters(G, cx, canvas, startAct) {
         drawText(cx, fMusic, track, W / 2 - w / 2, 184, { colour: '#f0e0e8' });
       }
       cx.globalAlpha = 1;
+    }
     }
     cx.restore();
     tile(cx, s.sprScanlines, 0.12);

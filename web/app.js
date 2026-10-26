@@ -362,10 +362,10 @@ async function showMenu() {
     history.replaceState(null, '', '#rmTutorialFloor1');
     fillRooms();
     showSelected();
-  } else runScene(r.scene);
+  } else runScene(r.scene, r.skip);
 }
 
-async function runScene(i) {
+async function runScene(i, skipIntro = false) {
   const s = STORY[i];
   if (!s) { showMenu(); return; }
   stopPlay();
@@ -378,7 +378,7 @@ async function runScene(i) {
   if (token !== menuToken) return;
   await card(G, cv, zoom, s, s.film ? 'film' : 'scene');
   if (token !== menuToken) return;
-  const room = s.intro && G.rooms.list.find(r => r.name === s.intro);
+  const room = !skipIntro && s.intro && G.rooms.list.find(r => r.name === s.intro);
   if (room) {
     story = { i, intro: true };
     if (await startPlay(room.name, null, s.introTrack)) {
