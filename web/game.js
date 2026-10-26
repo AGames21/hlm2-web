@@ -259,6 +259,13 @@ const FACTION = /^obj(E(Mafia|Gang|Police)|Colombian|Soldier|Guard|Prisoner)(Mel
 // free one is the goal of mp_grid_path, else the player's own point is. The
 // path runs at 2.5. Here the doors are left out of the grid, the path is
 // followed with wall collision, and a start cell that is blocked is allowed.
+// objSlidingDoors and objSlidingDoorsDark are solid objSolid children with no
+// events of their own, and nothing in the exe reads them past the object table,
+// so they keep GameMaker's default image_speed 1: their 10 frames loop, and the
+// precise mask (one per frame) opens a gap in the middle on most of them. Here
+// they draw looping and block walking only where every frame is solid; the
+// room-start mp_grid still sees frame 0.
+export const SLIDING = { objects: ['objSlidingDoors', 'objSlidingDoorsDark'], imageSpeed: 1 };
 export const PATH = { cell: 16, every: 20, speed: 2.5, rings: [1, 6, 11], angles: 8,
   objects: ['objSolid', 'objFurniture', 'objElevator'] };
 // Idle gang and mafia (create 0x748610 / 0x751f20 / 0x602bd0 / 0x750fa0,
@@ -478,7 +485,7 @@ function inherits(G, o, name) {
 }
 
 // Rasterise every solid instance's mask into one room-sized grid.
-export function buildSolids(G, room, kinds = ['objSolid']) {
+export function buildSolids(G, room, kinds = ['objSolid'], looping = SLIDING.objects) {
   const grid = new Uint8Array(room.w * room.h);
   const put = (x, y) => { if (x >= 0 && y >= 0 && x < room.w && y < room.h) grid[y * room.w + x] = 1; };
   for (const inst of room.insts) {
@@ -489,9 +496,14 @@ export function buildSolids(G, room, kinds = ['objSolid']) {
     const x0 = inst.x - s.ox, y0 = inst.y - s.oy;
     const m = G.masks.get(s.id);
     if (m) {
+      const n = looping.includes(o.name) ? m.frames : 1;
+      const on = (f, x, y) => m.bits[(f * m.h + y) * m.stride + (x >> 3)] & (0x80 >> (x & 7));
       for (let y = 0; y < m.h; y++)
-        for (let x = 0; x < m.w; x++)
-          if (m.bits[y * m.stride + (x >> 3)] & (0x80 >> (x & 7))) put(x0 + x, y0 + y);
+        for (let x = 0; x < m.w; x++) {
+          let all = true;
+          for (let f = 0; f < n && all; f++) all = !!on(f, x, y);
+          if (all) put(x0 + x, y0 + y);
+        }
     } else {
       for (let y = s.bbox.t; y <= s.bbox.b; y++)
         for (let x = s.bbox.l; x <= s.bbox.r; x++) put(x0 + x, y0 + y);
@@ -502,7 +514,7 @@ export function buildSolids(G, room, kinds = ['objSolid']) {
 
 // The mp_grid: a cell is blocked when any solid pixel falls in it.
 function buildPathGrid(G, room) {
-  const px = buildSolids(G, room, PATH.objects), c = PATH.cell;
+  const px = buildSolids(G, room, PATH.objects, []), c = PATH.cell;
   const cw = Math.ceil(room.w / c), ch = Math.ceil(room.h / c), blocked = new Uint8Array(cw * ch);
   for (let y = 0; y < room.h; y++)
     for (let x = 0; x < room.w; x++)
@@ -889,6 +901,8 @@ export async function play(env) {
     return { inst: i, x: i.x, y: i.y, box: maskBox(G, o), sprite: need(G.sprites.get(o.sprite).name), frame: 0, speed: 0, hit: false,
       brk: need(brk), broken: broken && need(broken) };
   }).filter(s => s.sprite && s.brk);
+  const sliders = room.insts.filter(i => SLIDING.objects.includes(G.objects.get(i.obj)?.name))
+    .map(i => ({ inst: i, x: i.x, y: i.y, sprite: need(G.sprites.get(G.objects.get(i.obj).sprite).name), frame: 0 })).filter(d => d.sprite);
 
   const elevators = room.insts.filter(i => G.objects.get(i.obj)?.name === ELEVATOR.object).map(i => {
     const o = G.objects.get(i.obj), mask = G.sprites.list.find(s => s.name === ELEVATOR.mask);
@@ -954,7 +968,7 @@ export async function play(env) {
 
   // Pre-render the room into the layers under and over the player, leaving
   // out everything that moves.
-  const dynamic = new Set([spawn, ...enemies.map(e => e.inst), ...doors.map(d => d.inst), ...weapons.map(w => w.inst), ...exits.map(x => x.inst), ...screens.map(s => s.inst), ...elevators.map(l => l.inst), ...bosses.flatMap(b => [b.inst, b.actor].filter(Boolean)), film?.inst]);
+  const dynamic = new Set([spawn, ...enemies.map(e => e.inst), ...doors.map(d => d.inst), ...weapons.map(w => w.inst), ...exits.map(x => x.inst), ...screens.map(s => s.inst), ...sliders.map(d => d.inst), ...elevators.map(l => l.inst), ...bosses.flatMap(b => [b.inst, b.actor].filter(Boolean)), film?.inst]);
   const layer = (keep) => {
     const c = new OffscreenCanvas(room.w, room.h), cx = c.getContext('2d');
     drawRoomItems(cx, items, imgs, keep, dynamic);
@@ -1853,6 +1867,7 @@ export async function play(env) {
     for (const d of doors) stepDoor(d);
     for (const w of weapons) stepWeapon(w);
     for (const b of [...bullets]) if (!stepBullet(b)) bullets.splice(bullets.indexOf(b), 1);
+    for (const d of sliders) d.frame = (d.frame + SLIDING.imageSpeed) % frames(d.sprite);
     for (const s of screens) if (s.speed && (s.frame += s.speed) >= frames(s.brk)) {
       s.speed = 0;
       if (s.broken) { s.sprite = s.broken; s.frame = 0; } else s.frame = frames(s.brk) - 1;
@@ -1969,6 +1984,7 @@ export async function play(env) {
     for (const d of dead) sprite(d.sprite, d.frame, d.x, d.y, -d.angle * RAD);
     for (const q of pieces) sprite(BURST.piece, 0, q.x, q.y, -q.angle * RAD);
     for (const s of screens) sprite(s.sprite, s.frame, s.x, s.y, 0);
+    for (const d of sliders) sprite(d.sprite, Math.floor(d.frame), d.x, d.y, 0);
     for (const l of elevators) sprite(l.sprite, Math.floor(l.frame), l.x, l.y, 0);
     for (const k of kos) sprite(k.sprite, k.frame, k.x, k.y, -(k.angle + (k.fallbackPose ? 90 : 0)) * RAD);
     for (const w of weapons) sprite(w.sprite, 0, w.x, w.y, -w.angle * RAD);

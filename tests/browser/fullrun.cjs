@@ -159,8 +159,15 @@ function installBot() {
     if (!cands.length) for (const e of g.enemies) add(e, 'other');
     // Standing on an exit that has not gone live (it was the way in): step off it.
     if (!cands.length && g.exits.some(x => x.off)) {
-      const x = g.exits.find(x => x.off);
-      add(x, 'step off', x.x + (p.x - x.x) * 3 + 40, x.y + (p.y - x.y) * 3 + 40);
+      // The nearest reachable cell well clear of the exit's arrival box.
+      const x = g.exits.find(x => x.off), o = x.off;
+      let best = -1;
+      for (let c = 0; c < f.dist.length; c++) {
+        if (f.dist[c] < 0 || best >= 0 && f.dist[c] >= f.dist[best]) continue;
+        const cx = (c % B.nav.w + 0.5) * CELL, cy = (Math.floor(c / B.nav.w) + 0.5) * CELL;
+        if (cx < x.x + x.box.l - o.r - 8 || cx > x.x + x.box.r - o.l + 8 || cy < x.y + x.box.t - o.b - 8 || cy > x.y + x.box.b - o.t + 8) best = c;
+      }
+      if (best >= 0) add(x, 'step off', (best % B.nav.w + 0.5) * CELL, (Math.floor(best / B.nav.w) + 0.5) * CELL);
     }
     if (!cands.length && g.talks.length) {
       const t = g.talks[0];
