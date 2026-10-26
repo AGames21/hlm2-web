@@ -25,7 +25,8 @@ async function freePort() {
 async function stepOntoExit(page, clearArrival = false) {
   await page.evaluate(clear => {
     const g = window.game, exit = g.exits[0];
-    if (clear) { g.player.x = exit.x - 30; g.player.y = exit.y; g.step(); }
+    // An exit the player arrived on stays off until the player is fully clear of it.
+    if (clear) for (const dx of [30, 60, 90, 120]) { g.player.x = exit.x - dx; g.player.y = exit.y; g.step(); if (!exit.off) break; }
     Object.assign(g.player, { x: exit.x, y: exit.y, hs: 0, vs: 0 }); g.step();
   }, clearArrival);
 }
