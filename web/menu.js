@@ -632,6 +632,7 @@ async function chapters(G, cx, canvas, startAct) {
 // over sprPalmTrees), and the prologue's film title (rmIntro). About three
 // seconds each, or a key.
 export async function card(G, canvas, zoom, s, kind) {
+  if (kind === 'film') return film(G, canvas, zoom, s);
   const cx = setup(canvas, zoom);
   const [pre, big, film1, film2] = await Promise.all(['fntPartPrefix', 'fntChapter', 'fntFilmTitle1', 'fntFilmTitle2'].map(n => loadFont(G, n)));
   const sp = await sprites(G, ['sprSun', 'sprPalmTrees', 'sprScanlines', 'sprNoise']);
@@ -661,6 +662,68 @@ export async function card(G, canvas, zoom, s, kind) {
     }
     cx.globalAlpha = 1;
     tile(cx, sp.sprScanlines, 0.2);
+    tile(cx, sp.sprNoise, 0.05, (t * 37) % 160, (t * 53) % 160);
+  });
+}
+
+// The prologue's opening (rmIntro, objFilmTitle): the tape goes in with a
+// white flash that fades through beige to dark, then the night skyline
+// (bgSkyline2 far, bgSkyline1 near with sprHouseLight's outlines), stars and
+// sprMidnightMoon, with the film's lines fading in over it. The exe's credit
+// lines are not in the wad, so the film's own title stands in for them, in the
+// same fonts and colours (white, then red raised). Times are from the native
+// capture: about 1.5 s of flash, then the lines.
+async function film(G, canvas, zoom, s) {
+  const cx = setup(canvas, zoom);
+  const [red, white] = await Promise.all(['fntFilmTitle1', 'fntFilmTitle2'].map(n => loadFont(G, n)));
+  const sp = await sprites(G, ['Backgrounds/midnightanimal/bgSkyline1', 'Backgrounds/midnightanimal/bgSkyline2', 'sprHouseLight', 'sprMidnightMoon', 'sprStar', 'sprScanlines', 'sprNoise']);
+  const near = sp['Backgrounds/midnightanimal/bgSkyline1'], far = sp['Backgrounds/midnightanimal/bgSkyline2'];
+  const stars = Array.from({ length: 46 }, (_, i) => [(i * 97.3) % W, (i * 53.7) % 150, i % 6]);
+  let moon = null;
+  if (sp.sprMidnightMoon) {
+    const f = sp.sprMidnightMoon.frames[0];
+    moon = new OffscreenCanvas(f.w, f.h);
+    const m = moon.getContext('2d'), g = m.createLinearGradient(0, 0, 0, f.h);
+    m.drawImage(sp.sprMidnightMoon.img, f.x, f.y, f.w, f.h, 0, 0, f.w, f.h);
+    g.addColorStop(0, '#f0b886'); g.addColorStop(0.55, '#b0607a'); g.addColorStop(1, '#4a1450');
+    m.globalCompositeOperation = 'source-atop'; m.fillStyle = g; m.fillRect(0, 0, f.w, f.h);
+  }
+  const [first, ...rest] = s.title.split(' '), second = rest.join(' ');
+  const FLASH = 90, IN = 120, OUT = 420, len = 470;
+  return loop(canvas, (t, ev) => {
+    if ((t > 20 && skip(ev)) || t > len) return true;
+    cx.fillStyle = '#060607'; cx.fillRect(0, 0, W, H);
+    for (const [x, y, k] of stars) {
+      cx.globalAlpha = 0.35 + 0.35 * Math.sin(t / 40 + x);
+      const img = tinted(sp.sprStar, k + Math.floor(t / 12), '#3ab0b0');
+      if (img) cx.drawImage(img, Math.round(x), Math.round(y));
+    }
+    cx.globalAlpha = 1;
+    if (moon) { cx.save(); cx.shadowColor = '#c04a9a'; cx.shadowBlur = 10; cx.drawImage(moon, 154, 44, 48, 48); cx.restore(); }
+    const fi = tinted(far, 0, '#163034');
+    if (fi) cx.drawImage(fi, -80, 90);
+    const ni = tinted(near, 0, '#123438');
+    if (ni) cx.drawImage(ni, 0, 0);
+    const edge = tinted(sp.sprHouseLight, 0, '#7a2468');
+    if (edge) { cx.globalCompositeOperation = 'lighter'; cx.globalAlpha = 0.55; cx.drawImage(edge, 0, 0); cx.globalCompositeOperation = 'source-over'; cx.globalAlpha = 1; }
+    // The lines: the white word, then the red one a little higher.
+    const a = Math.max(0, Math.min(1, (t - IN) / 25, (OUT - t) / 40));
+    if (a > 0) {
+      const sw = 0.55, sr = 0.45, w1 = textWidth(white, first) * sw, w2 = textWidth(red, second) * sr, x0 = W / 2 - (w1 + 6 + w2) / 2;
+      cx.globalAlpha = a;
+      drawText(cx, white, first, x0 + 1, 113, { colour: '#3a0010', scale: sw });
+      drawText(cx, white, first, x0, 112, { colour: '#f4e8ec', scale: sw });
+      drawText(cx, red, second, x0 + w1 + 7, 107, { colour: '#3a0010', scale: sr });
+      drawText(cx, red, second, x0 + w1 + 6, 106, { colour: '#ee1020', scale: sr });
+      cx.globalAlpha = 1;
+    }
+    // The tape's flash: white, beige, then dark, over the first second and a half.
+    if (t < FLASH) {
+      const k = t / FLASH, c = k < 0.35 ? merge([255, 250, 245], [216, 184, 136], k / 0.35) : merge([216, 184, 136], [12, 10, 10], Math.min(1, (k - 0.35) / 0.35));
+      cx.fillStyle = css(c); cx.globalAlpha = k < 0.7 ? 1 : 1 - (k - 0.7) / 0.3; cx.fillRect(0, 0, W, H);
+      cx.globalAlpha = 1;
+    }
+    tile(cx, sp.sprScanlines, 0.12);
     tile(cx, sp.sprNoise, 0.05, (t * 37) % 160, (t * 53) % 160);
   });
 }

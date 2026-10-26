@@ -33,11 +33,15 @@ async function stepOntoExit(page, clearArrival = false) {
   }, clearArrival);
 }
 async function pointAt(page, worldX, worldY, click = 'left') {
-  const point = await page.evaluate(([x, y]) => {
-    const r = document.querySelector('#canvas').getBoundingClientRect(), g = window.game;
-    return { x: r.x + (x - g.cam.x) * r.width / 480, y: r.y + (y - g.cam.y) * r.height / 270 };
-  }, [worldX, worldY]);
-  await page.mouse.move(point.x, point.y); await delay(40);
+  // The camera leads toward the mouse, so re-aim until the view settles.
+  let point;
+  for (let i = 0; i < 6; i++) {
+    point = await page.evaluate(([x, y]) => {
+      const r = document.querySelector('#canvas').getBoundingClientRect(), g = window.game;
+      return { x: r.x + (x - g.cam.x) * r.width / 480, y: r.y + (y - g.cam.y) * r.height / 270 };
+    }, [worldX, worldY]);
+    await page.mouse.move(point.x, point.y); await delay(i ? 120 : 40);
+  }
   await page.mouse.click(point.x, point.y, { button: click });
 }
 async function punchAndFinish(page) {
@@ -212,11 +216,16 @@ async function punchAndFinish(page) {
       assert.equal(await page.evaluate(() => window.game.stats.kills), 1);
       // The room handle is published before its first animation frame. Canvas
       // resizing clears its pixels, so wait for rendering, not just the handle.
-      await page.waitForFunction(() => {
-        const pixel = document.querySelector('#canvas').getContext('2d').getImageData(0, 0, 1, 1).data;
-        return pixel[0] === 80 && pixel[1] === 60 && pixel[2] === 30 && pixel[3] === 255;
-      });
-      const pixel = await page.evaluate(() => [...document.querySelector('#canvas').getContext('2d').getImageData(0, 0, 1, 1).data]);
+      // The view is not clamped to the room, so read the first on-screen tile's
+      // dark checker square (3 px into a 16 px tile).
+      const roomPixel = () => {
+        const c = document.querySelector('#canvas'), { cam } = window.game, k = c.width / 480;
+        const at = v => Math.floor((Math.ceil(Math.max(0, v) / 16) * 16 + 3 - v) * k);
+        const x = at(cam.x), y = at(cam.y);
+        return [...c.getContext('2d').getImageData(x, y, 1, 1).data];
+      };
+      await page.waitForFunction(`(${roomPixel})().join() === '80,60,30,255'`);
+      const pixel = await page.evaluate(`(${roomPixel})()`);
       assert.deepEqual(pixel, [80, 60, 30, 255]);
       await punchAndFinish(page);
       assert.equal(await page.evaluate(() => window.game.stats.kills), 2);

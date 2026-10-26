@@ -9,6 +9,7 @@
 // step on release, then both speeds shrink by 0.98 while |hs|+|vs| exceeds
 // walk speed + 2, which caps diagonals. animSpeed is still a guess.
 import { drawRoomItems } from './render.js';
+import { loadFont, drawText, textWidth } from './score.js';
 import { options, gameKey } from './settings.js';
 import { TALKS, TALKERS } from './conversations.js';
 import { conversation, TALK } from './dialogue.js';
@@ -492,7 +493,17 @@ export const WEAPON = { pickupScale: 3, throwSpeed: 12, friction: 0.25, spin: 3,
 export const BLOOD = { splats: ['sprSplat1', 'sprSplat2', 'sprSplat3', 'sprSplat4'], pool: ['sprBigBlood1', 'sprBigBlood2'],
   scaleMin: 0.8, scaleRand: 0.4, imageSpeed: 0.15, count: 4, spread: 30, speedMin: 1, speedRand: 4, friction: 0.25 };
 // Camera: the view leads toward the mouse (a guess at objCamera's step).
-export const CAMERA = { lead: 0.2, ease: 0.15 };
+export const CAMERA = { lead: 0.5, max: 22, ease: 0.15 };
+
+// The Pilot's night (rmTutorialFloor1), matched to the native game: a dark red
+// backdrop instead of the wash, the world multiplied down and reddened, a soft
+// glow on the player, no score HUD, and a tutorial hint in a black box at the
+// bottom: text 0 (walking), or text 1 (doors) while a door is near.
+export const NIGHT = {
+  room: /^rmTutorialFloor1$/, top: [44, 0, 0], bottom: [16, 0, 0], tint: 'rgb(222,204,189)',
+  glow: { r: 110, colour: [120, 40, 40], a: 0.35 },
+  hint: { text: 0, door: 1, near: 96, font: 'fntLabel', scale: 1.15, track: 0, padX: 7, top: 245, h: 14, box: '#000', shadow: 'rgb(3,124,124)', a: [255, 135, 255], b: [255, 240, 255] },
+};
 export const EXEC = { scale: 2, imageSpeed: 0.25, hammerShift: 4 };
 
 
@@ -1077,6 +1088,8 @@ export async function play(env) {
   const keys = new Set(), pressed = new Set();
   const mouse = { x: VIEW_W / 2, y: VIEW_H / 2, click: false, right: false };
   const cam = { x: 0, y: 0, shake: 0 };
+  const night = NIGHT.room.test(room.name);
+  const hint = night && G.text?.[NIGHT.hint.text] ? { font: await loadFont(G, NIGHT.hint.font) } : null;
   const onKey = (e) => {
     if (env.paused?.()) return;
     if (e.type === 'keydown' && (e.target.closest?.('input, select, textarea, button') || e.target.isContentEditable)) return;
@@ -1994,8 +2007,13 @@ export async function play(env) {
       cam.x = Math.round(cam.fx); cam.y = Math.round(cam.fy);
       return;
     }
-    const tx = Math.max(0, Math.min(room.w - VIEW_W, p.x - VIEW_W / 2 + (mouse.x - VIEW_W / 2) * CAMERA.lead));
-    const ty = Math.max(0, Math.min(room.h - VIEW_H, p.y - VIEW_H / 2 + (mouse.y - VIEW_H / 2) * CAMERA.lead));
+    // Not clamped to the room: the native view follows the player past the
+    // edges and shows the backdrop there.
+    // The view leads toward the cursor by half its offset from the centre,
+    // capped at 22 px (measured on the native Pilot).
+    const ox = mouse.x - VIEW_W / 2, oy = mouse.y - VIEW_H / 2, len = Math.hypot(ox, oy);
+    const k = len ? Math.min(len * CAMERA.lead, CAMERA.max) / len : 0;
+    const tx = p.x + ox * k - VIEW_W / 2, ty = p.y + oy * k - VIEW_H / 2;
     // The eased position is kept apart so the view lands on whole pixels.
     cam.fx = (cam.fx ?? tx) + (tx - (cam.fx ?? tx)) * ease; cam.fy = (cam.fy ?? ty) + (ty - (cam.fy ?? ty)) * ease;
     cam.x = Math.round(cam.fx); cam.y = Math.round(cam.fy);
@@ -2013,7 +2031,30 @@ export async function play(env) {
     cx.restore();
   }
 
+  // A room-sized layer, drawn only where it overlaps the view (the camera can
+  // sit past the room's edges).
+  function blitLayer(img) {
+    const sx = Math.max(0, cam.x), sy = Math.max(0, cam.y);
+    const ex = Math.min(img.width, cam.x + VIEW_W), ey = Math.min(img.height, cam.y + VIEW_H);
+    if (ex > sx && ey > sy) cx.drawImage(img, sx, sy, ex - sx, ey - sy, sx - cam.x, sy - cam.y, ex - sx, ey - sy);
+  }
+  function drawHint() {
+    const h = NIGHT.hint, f = hint.font;
+    const atDoor = doors.some(d => Math.hypot(d.x - p.x, d.y - p.y) < h.near);
+    const chars = [...(atDoor && G.text[h.door] || G.text[h.text])];
+    const w = chars.reduce((n, ch) => n + textWidth(f, ch) * h.scale + h.track, -h.track);
+    const k = (1 - Math.cos(frameClock / 20)) / 2, col = `rgb(${h.a.map((v, i) => Math.round(v + (h.b[i] - v) * k))})`;
+    const x0 = Math.round(VIEW_W / 2 - w / 2), y = h.top + Math.round((h.h - (f.base || 8) * h.scale) / 2);
+    cx.save();
+    cx.fillStyle = h.box; cx.fillRect(x0 - h.padX, h.top, Math.round(w) + h.padX * 2, h.h);
+    for (const [colour, d] of [[h.shadow, 1], [col, 0]]) {
+      let x = x0 + d;
+      for (const ch of chars) { drawText(cx, f, ch, x, y + d, { colour, scale: h.scale }); x += textWidth(f, ch) * h.scale + h.track; }
+    }
+    cx.restore();
+  }
   function hud() {
+    if (night) { if (hint) drawHint(); return; }
     cx.save();
     cx.font = 'bold 10px monospace';
     cx.textAlign = 'center';
@@ -2055,15 +2096,19 @@ export async function play(env) {
     const sx = Math.round((Math.random() * 2 - 1) * shake), sy = Math.round((Math.random() * 2 - 1) * shake);
     cx.save();
     cx.translate(sx, sy);
-    if (c === WASH.colour) {
+    if (night) {
+      const g = cx.createLinearGradient(0, 0, 0, VIEW_H);
+      g.addColorStop(0, `rgb(${NIGHT.top})`); g.addColorStop(1, `rgb(${NIGHT.bottom})`);
+      cx.fillStyle = g;
+    } else if (c === WASH.colour) {
       const k = (1 - Math.cos(frameClock * 2 * Math.PI / WASH.period)) / 2, mix = WASH.a.map((v, i) => Math.round(v + (WASH.b[i] - v) * k));
       const g = cx.createLinearGradient(0, 0, 0, VIEW_H);
       g.addColorStop(0, `rgb(${mix})`); g.addColorStop(1, `rgb(${mix.map(v => Math.round(v * WASH.dark))})`);
       cx.fillStyle = g;
     } else cx.fillStyle = `rgb(${c & 255},${(c >> 8) & 255},${(c >> 16) & 255})`;
     cx.fillRect(-4, -4, VIEW_W + 8, VIEW_H + 8);
-    cx.drawImage(under, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
-    cx.drawImage(gore, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
+    blitLayer(under);
+    blitLayer(gore);
     for (const q of splats) {
       const a = art.get(q.sprite);
       if (!a) continue;
@@ -2098,9 +2143,9 @@ export async function play(env) {
     }
     if (p.dead) {
       sprite(p.dead.sprite, p.dead.frame, p.x, p.y, -p.dead.angle * RAD);
-      cx.drawImage(over, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H); cx.restore(); hud(); return;
+      blitLayer(over); cx.restore(); hud(); return;
     }
-    if (p.exec) { sprite(p.exec.sprite, p.exec.frame, p.x, p.y, -p.exec.angle * RAD); cx.drawImage(over, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H); cx.restore(); hud(); return; }
+    if (p.exec) { sprite(p.exec.sprite, p.exec.frame, p.x, p.y, -p.exec.angle * RAD); blitLayer(over); cx.restore(); hud(); return; }
     const moving = p.hs || p.vs;
     if (p.roll) sprite(P.roll, p.roll.frame, p.x, p.y, p.roll.dir);
     else if (!p.sceneHidden) {
@@ -2108,7 +2153,15 @@ export async function play(env) {
       if (held()?.special) for (const s of bearArms()) sprite(P.arm, p.flash && s.side === p.barrel ? 1 : 0, s.x, s.y, -s.deg * RAD);
       sprite(p.sprite, attacking() ? p.attackFrame : moving ? p.frame : 0, p.x, p.y, p.aim);
     }
-    cx.drawImage(over, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
+    blitLayer(over);
+    if (night) {
+      // Multiply the world down, then the glow on the player.
+      cx.globalCompositeOperation = 'multiply'; cx.fillStyle = NIGHT.tint; cx.fillRect(-4, -4, VIEW_W + 8, VIEW_H + 8);
+      const gx = Math.round(p.x - cam.x), gy = Math.round(p.y - cam.y), g = cx.createRadialGradient(gx, gy, 0, gx, gy, NIGHT.glow.r);
+      g.addColorStop(0, `rgba(${NIGHT.glow.colour},${NIGHT.glow.a})`); g.addColorStop(1, `rgba(${NIGHT.glow.colour},0)`);
+      cx.globalCompositeOperation = 'lighter'; cx.fillStyle = g; cx.fillRect(gx - NIGHT.glow.r, gy - NIGHT.glow.r, NIGHT.glow.r * 2, NIGHT.glow.r * 2);
+      cx.globalCompositeOperation = 'source-over';
+    }
     cx.restore();
     if (cutWait > 0) { drawCut(); return; }
     if (!film) hud();
