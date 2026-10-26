@@ -246,10 +246,12 @@ async function punchAndFinish(page) {
     });
     await page.locator('#settings-close').click();
     await check('Continue from score screen loads the next level', async () => {
-      if (await page.evaluate(() => window.game.room === 'rmTutorialFloor2')) {
+      // The screen ignores clicks for its first 30 frames, which run slower on a busy machine: click until it goes on.
+      for (let i = 0; i < 20 && await page.evaluate(() => window.game.room === 'rmTutorialFloor2'); i++) {
         const box = await page.locator('#canvas').boundingBox(); await page.mouse.click(box.x + 30, box.y + 30);
+        await delay(500);
       }
-      await page.waitForFunction(() => window.game?.room === 'rmFansLevel1Floor1');
+      await page.waitForFunction(() => window.game?.room === 'rmFansLevel1Floor1', null, { timeout: 20000 });
     });
     await check('YouTube embed validates hosts and can be closed', async () => {
       await page.route('https://www.youtube-nocookie.com/**', route => route.fulfill({ status: 200, contentType: 'text/html', body: '<p>Test embed</p>' }));
@@ -395,7 +397,7 @@ async function punchAndFinish(page) {
       assert.match(await page.locator('#status').textContent(), /Enter skips to the level/);
       assert.equal(await page.evaluate(() => +localStorage.getItem('hlm2-web-progress')), 1);
       await page.keyboard.press('Enter');
-      await page.waitForFunction(() => window.game?.room === 'rmFansLevel1Floor1');
+      await page.waitForFunction(() => window.game?.room === 'rmFansLevel1Floor1', null, { timeout: 20000 });
     });
     await check('No uncaught browser exceptions across the integrated workflow', async () => assert.deepEqual(errors, []));
     await context.close();

@@ -68,6 +68,9 @@ export const VICTIMS = {
   objVictim4: { walk: 'sprVictim4Walk', attack: 'sprVictim4Punch', legs: 'sprVictim4Legs' },
   objVictim6: { dead: 'sprVictim6Dead' },
   objVictim5: { exec: { sprPig: 'sprPigDeadGirl' } },
+  // scrVictim2 (0x11f44d0): fetches the bat within 22px, swings sprVictim2AttackBat;
+  // the 22/64 distances match the unarmed fetch (0xf4e710), so it runs that.
+  objVictim2: { walk: 'sprVictim2Walk', idle: 'sprVictim2Idle', legs: 'sprVictim2Legs', arm: 'Unarmed' },
 };
 // objEditorDoorV (25) / objEditorDoorH (26): touching a door sets its swing
 // to +-8 (+-7 for H) degrees a step unless it already turns faster than 3.5.
@@ -232,7 +235,8 @@ export const ENEMY = { wanderMin: 60, wanderRand: 60, wanderAnim: 0.1, ahead: 3,
   guns: ['M16', 'Shotgun', 'DoubleBarrel', 'Kalashnikov'] };
 // The "Easier enemies" option (on by default, not in the original): gunmen wait
 // twice as long before the first shot, turn their aim slower and fire 25% less often.
-export const EASY = { firstShot: 30, turn: 7, cooldown: 1.25 };
+// Port option, not in the game: melee ones also run a bit slower and wait before their first swing.
+export const EASY = { firstShot: 30, turn: 7, cooldown: 1.25, chase: 0.85, swingCool: 1.5 };
 const firstShot = () => options.easier ? EASY.firstShot : ENEMY.recheck;
 // Create-time weapon swaps: object -> [held weapon that is swapped (null:
 // always), choices].
@@ -820,8 +824,9 @@ export async function play(env) {
     if (vic?.exec?.[pre]) e.spr.exec = need(vic.exec[pre]);
     if (vic?.dead) e.spr.deadShot = e.spr.deadShotgun = e.spr.deadBlunt = e.spr.killStomp = e.spr.killBlunt = need(vic.dead);
     if (vic?.walk) {
-      Object.assign(e.spr, { walk: need(vic.walk), idle: need(vic.walk), attack: vic.attack ? need(vic.attack) : null, legs: need(vic.legs) });
-      Object.assign(e, { mafia: true, gun: null, g: null, hs: 0, vs: 0, moveDir: 0, legFrame: 0, alarm: 1, check: Math.floor(random(ENEMY.recheck)), cooldown: 0, wait: 0, seen: null,
+      Object.assign(e.spr, { walk: need(vic.walk), idle: need(vic.idle || vic.walk), attack: vic.attack ? need(vic.attack) : null, legs: need(vic.legs) });
+      if (vic.arm) for (const w of ['Bat']) { need(base + 'Walk' + w); need(base + 'Attack' + w); }
+      Object.assign(e, { mafia: true, gun: vic.arm || null, calmUntilSeen: !!vic.arm, g: null, hs: 0, vs: 0, moveDir: 0, legFrame: 0, alarm: 1, check: Math.floor(random(ENEMY.recheck)), cooldown: 0, wait: 0, seen: null,
         still: true, imageSpeed: 0 });
     }
     const fat = FAT.kinds[o.name];
@@ -1492,7 +1497,9 @@ export async function play(env) {
       }
     }
     let speed = 0;
-    if (e.gun === 'Unarmed' && !e.dog && unarmed(e)) {
+    // GUESS: Victim2 stands idle until it notices the player (native fetched the bat as the player came in).
+    if (e.gun === 'Unarmed' && !e.dog && !(e.calmUntilSeen && !e.alert) && unarmed(e)) {
+      if (e.hs || e.vs) e.sprite = e.spr.walk;
       // 0xf4e710 moved it (stepUnarmed below).
     } else if (!e.alert) {
       if (!e.still && --e.alarm <= 0) {
@@ -1544,7 +1551,7 @@ export async function play(env) {
         // a wall is in the way (seen through a gap), follow a path to the
         // player, made again every 20 steps.
         e.hs = e.vs = 0;
-        const chase = e.dog ? DOG.speed : ENEMY.chaseSpeed;
+        const chase = (e.dog ? DOG.speed : ENEMY.chaseSpeed) * (options.easier ? EASY.chase : 1);
         if (see && d > 2 && free(sol, e.box, e.x + lenX(chase, dir), e.y + lenY(chase, dir))) {
           e.path = null;
           e.hs = lenX(chase, dir); e.vs = lenY(chase, dir);
@@ -1557,8 +1564,8 @@ export async function play(env) {
           if (e.spr.attack && e.sprite !== e.spr.attack) { e.sprite = e.spr.attack; e.frame = 0; }
           if (!p.dead && !p.exec) sfx(DOG.rip);
           killPlayer(P.deadBlunt, e.angle);
-        } else if (!g && d < ENEMY.melee && !(e.cool > 0) && !e.swing) {
-          e.swing = true; e.cool = ENEMY.swing.cool; e.angle = dir;
+        } else if (!g && d < ENEMY.melee && !(e.cool > 0) && !e.swing && !(options.easier && e.wait > 0)) {
+          e.swing = true; e.cool = Math.round(ENEMY.swing.cool * (options.easier ? EASY.swingCool : 1)); e.angle = dir;
           if (e.spr.attack) { e.sprite = e.spr.attack; e.frame = ENEMY.swing.start; }
           sfx(SOUND.swing[Math.floor(random(2))]);
         } else if (e.cool > 0) e.cool--;
