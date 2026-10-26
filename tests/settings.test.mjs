@@ -44,3 +44,8 @@ test('Saves from before the trackpad keys gain them without clashes', () => {
   assert.equal(gameKey('f', b), 'f');
   assert.equal(gameKey('Q', defaultBindings), 'q');
 });
+
+test('Easier enemies is on by default and a saved choice is kept', () => {
+  assert.equal(normalizeSettings({}).easier, true);
+  assert.equal(normalizeSettings({ easier: false }).easier, false);
+});

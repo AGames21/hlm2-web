@@ -230,6 +230,10 @@ export const ENEMY = { wanderMin: 60, wanderRand: 60, wanderAnim: 0.1, ahead: 3,
   swing: { image: 0.5, start: 1, cool: 30, ahead: 8 },
   unarmed: { run: 2.5, image: 0.2, take: 22, slow: 2, near: 64, creep: 1 },
   guns: ['M16', 'Shotgun', 'DoubleBarrel', 'Kalashnikov'] };
+// The "Easier enemies" option (on by default, not in the original): gunmen wait
+// twice as long before the first shot, turn their aim slower and fire 25% less often.
+export const EASY = { firstShot: 30, turn: 7, cooldown: 1.25 };
+const firstShot = () => options.easier ? EASY.firstShot : ENEMY.recheck;
 // Create-time weapon swaps: object -> [held weapon that is swapped (null:
 // always), choices].
 export const ENEMY_SWAP = {
@@ -502,7 +506,7 @@ export const CAMERA = { lead: 0.5, max: 22, ease: 0.15 };
 export const NIGHT = {
   room: /^rmTutorialFloor1$/, top: [44, 0, 0], bottom: [16, 0, 0], tint: 'rgb(222,204,189)',
   glow: { r: 110, colour: [120, 40, 40], a: 0.35 },
-  hint: { text: 0, door: 1, near: 96, font: 'fntLabel', scale: 1.15, track: 0, padX: 7, top: 245, h: 14, box: '#000', shadow: 'rgb(3,124,124)', a: [255, 135, 255], b: [255, 240, 255] },
+  hint: { text: 0, door: 1, near: 96, font: 'fntLabel', scale: 1.15, track: 0, padX: 7, top: 245, h: 14, box: '#000', shadow: 'rgb(3,124,124)', a: [255, 135, 255], b: [255, 240, 255], flash: 12, exec: 2, look: 3 },
 };
 export const EXEC = { scale: 2, imageSpeed: 0.25, hammerShift: 4 };
 
@@ -653,7 +657,7 @@ function nearestFree(sol, box, x, y, ok = () => true) {
 // With `corner`, a mover clipping the edge of a doorway or wall end slides
 // sideways toward the clear lane up to that many px away instead of sticking.
 // A port choice: a 24px box has only 4px either side in a 32px doorway.
-export const CORNER = 10;
+export const CORNER = 18;
 function moveAxis(sol, box, p, axis, v, corner = 0) {
   const at = (d) => axis === 'x' ? free(sol, box, p.x + d, p.y) : free(sol, box, p.x, p.y + d);
   if (at(v)) { p[axis] += v; return v; }
@@ -663,8 +667,9 @@ function moveAxis(sol, box, p, axis, v, corner = 0) {
   p[axis] += moved;
   if (corner && s) {
     const o = axis === 'x' ? 'y' : 'x';
-    // Never more than half the mover's width, so a head-on hit still blocks.
-    corner = Math.min(corner, Math.floor((axis === 'x' ? box.b - box.t : box.r - box.l) / 2));
+    // At most 3/4 of the mover's width: one stopped past the centre of a wall end still slides
+    // into the doorway beside it, while a head-on hit on a long wall still blocks.
+    corner = Math.min(corner, Math.ceil((axis === 'x' ? box.b - box.t : box.r - box.l) * 0.75));
     const fits = (k, d) => axis === 'x' ? free(sol, box, p.x + d, p.y + k) : free(sol, box, p.x + k, p.y + d);
     for (let k = 1; k <= corner; k++)
       for (const side of [-1, 1]) {
@@ -1182,7 +1187,7 @@ export async function play(env) {
   // lands on the man.
   function split(c) {
     enemies.splice(enemies.indexOf(c), 1);
-    for (const e of c.pair) { enemies.push(e); if (e.mafia) Object.assign(e, { alert: true, seen: { x: p.x, y: p.y }, wait: ENEMY.recheck }); }
+    for (const e of c.pair) { enemies.push(e); if (e.mafia) Object.assign(e, { alert: true, seen: { x: p.x, y: p.y }, wait: firstShot() }); }
     return c.pair.find(e => e.isEnemy) || c.pair[0];
   }
   function stepCouple(c) {
@@ -1314,6 +1319,7 @@ export async function play(env) {
     const animation = (held() ? held().kill : P.stomp), kill = animation || P.punch || P.walk;
     const duration = animation ? frames(animation) : 6;
     kos.splice(kos.indexOf(k), 1);
+    if (hint) hint.stage = 2;
     if (k.spr.exec) {
       const own = k.spr.exec, d = { x: k.x, y: k.y, angle: k.angle, sprite: own, frame: frames(own) - 1, imageSpeed: 0 };
       p.exec = { x: k.x, y: k.y, angle: k.angle, sprite: own, frame: 0, duration: frames(own), body: { ...d }, hit: Infinity, after: d };
@@ -1481,7 +1487,7 @@ export async function play(env) {
       e.check = e.dog ? DOG.recheck : ENEMY.recheck;
       // The first shot waits 15 steps of sight (var 17, set to 15 at create).
       if (spots(e)) {
-        if (!e.alert) { e.wait = ENEMY.recheck; if (e.dog) sfx(DOG.bark); }
+        if (!e.alert) { e.wait = firstShot(); if (e.dog) sfx(DOG.bark); }
         e.alert = true; e.seen = { x: p.x, y: p.y };
       }
     }
@@ -1521,19 +1527,19 @@ export async function play(env) {
             if (free(sol, e.box, e.x + bx, e.y)) e.x += bx;
             if (free(sol, e.box, e.x, e.y + by)) e.y += by;
           }
-          e.angle = turnToward(e.angle, dir, ENEMY.turn);
+          e.angle = turnToward(e.angle, dir, options.easier ? EASY.turn : ENEMY.turn);
         }
         if (e.wait > 0) e.wait--;
         else if (e.cooldown > 0) e.cooldown--;
         else {
-          e.cooldown = g.cooldown;
+          e.cooldown = Math.round(g.cooldown * (options.easier ? EASY.cooldown : 1));
           if (e.spr.attack) { e.sprite = e.spr.attack; e.frame = 0; }
           fire(e, e.angle, g, false, g.side !== undefined ? 1 : 0);
         }
       } else {
         // Out of sight, the search state (var 31 = 3 in 0x11a9000) sets the
         // first-shot counter (var 17) back to 15, so a re-spotted gunner waits again.
-        if (g && !see) e.wait = ENEMY.recheck;
+        if (g && !see) e.wait = firstShot();
         // Unarmed and in sight: run straight in (0xf4e710). Otherwise, or when
         // a wall is in the way (seen through a gap), follow a path to the
         // player, made again every 20 steps.
@@ -1630,7 +1636,7 @@ export async function play(env) {
     e.spr.walk = e.spr.idle = need(e.base + 'Walk' + held);
     e.spr.attack = need(e.base + 'Attack' + held) || need(e.base + 'Attack' + held + '1') || (held === 'Machete' && need(e.base + 'AttackMachette'));
     e.sprite = e.spr.walk; e.frame = 0; e.path = null;
-    e.cooldown = 0; e.wait = ENEMY.recheck;
+    e.cooldown = 0; e.wait = firstShot();
   }
 
   // One step of a swing: the point 8px ahead, or the enemy's own spot, in the
@@ -1670,7 +1676,7 @@ export async function play(env) {
     if (e.wake > 0) { e.wake--; return; }
     e.wake = IDLE.every;
     if (!spots(e)) return;
-    const n = Object.assign(e.idle, { x: e.x, y: e.y, angle: e.angle, alert: true, seen: { x: p.x, y: p.y }, wait: ENEMY.recheck });
+    const n = Object.assign(e.idle, { x: e.x, y: e.y, angle: e.angle, alert: true, seen: { x: p.x, y: p.y }, wait: firstShot() });
     const left = IDLE.leave[e.kind];
     if (left && leaveSprite[e.kind]) dead.push({ x: e.x + left.dx, y: e.y + left.dy, angle: left.still ? 0 : e.angle, sprite: leaveSprite[e.kind], frame: 0, imageSpeed: 0 });
     enemies[enemies.indexOf(e)] = n;
@@ -1709,7 +1715,7 @@ export async function play(env) {
     e.angle = pointDir(e.x, e.y, p.x, p.y);
     if (e.frame < HIDE.up) { e.frame = Math.min(HIDE.up, e.frame + HIDE.rise); return; }
     if (--e.cooldown > 0) return;
-    e.cooldown = e.g.cooldown;
+    e.cooldown = Math.round(e.g.cooldown * (options.easier ? EASY.cooldown : 1));
     fire(e, e.angle, e.g, false);
     if (--e.ammo <= 0) Object.assign(e, { reloading: HIDE.reloadSteps, sprite: e.spr.reload || e.spr.idle, frame: e.spr.reload ? 0 : HIDE.up });
   }
@@ -2079,13 +2085,19 @@ export async function play(env) {
   function drawHint() {
     const h = NIGHT.hint, f = hint.font;
     const atDoor = doors.some(d => Math.hypot(d.x - p.x, d.y - p.y) < h.near);
-    const chars = [...(atDoor && G.text[h.door] || G.text[h.text])];
+    // Native order: walk (door hint near a door), execute while someone is knocked out, then look around after the first execute.
+    if (!hint.stage && kos.length) hint.stage = 1;
+    const id = hint.stage === 2 ? h.look : hint.stage === 1 && kos.length ? h.exec : atDoor && G.text[h.door] ? h.door : h.text;
+    const chars = [...G.text[id]];
+    // native flashes the box red, with white text, for a moment whenever the hint changes
+    if (hint.id !== id) { hint.id = id; hint.flash = h.flash; }
+    const fl = hint.flash > 0 ? hint.flash-- / h.flash : 0;
     const w = chars.reduce((n, ch) => n + textWidth(f, ch) * h.scale + h.track, -h.track);
     const k = (1 - Math.cos(frameClock / 20)) / 2, col = `rgb(${h.a.map((v, i) => Math.round(v + (h.b[i] - v) * k))})`;
     const x0 = Math.round(VIEW_W / 2 - w / 2), y = h.top + Math.round((h.h - (f.base || 8) * h.scale) / 2);
     cx.save();
-    cx.fillStyle = h.box; cx.fillRect(x0 - h.padX, h.top, Math.round(w) + h.padX * 2, h.h);
-    for (const [colour, d] of [[h.shadow, 1], [col, 0]]) {
+    cx.fillStyle = fl ? `rgb(${Math.round(191 * fl)},0,0)` : h.box; cx.fillRect(x0 - h.padX, h.top, Math.round(w) + h.padX * 2, h.h);
+    for (const [colour, d] of [[h.shadow, 1], [fl ? '#fff' : col, 0]]) {
       let x = x0 + d;
       for (const ch of chars) { drawText(cx, f, ch, x, y + d, { colour, scale: h.scale }); x += textWidth(f, ch) * h.scale + h.track; }
     }
@@ -2239,6 +2251,7 @@ export async function play(env) {
     room: room.name, stats, cam, splats, gore, player: p, keys, pressed, mouse, solids: sol, box, enemies, bosses, kos, dead, doors, weapons, bullets, exits, elevators, talks, talkers, step, draw, leave,
     left: false, talking: () => !!env.cutscene && !env.cutscene.done,
     get lock() { return lock; },
+    get hint() { return hint?.id; },
     diagnostics() {
       return {
         room: room.name, character: pobj.name, running, paused: !!env.paused?.(),

@@ -26,6 +26,7 @@ jobs:
       - name: Run simulation regression tests
         run: node --test tests/*.test.mjs
       - name: Prepare browser playtest tools
+        timeout-minutes: 8
         run: |
           npm install --prefix "$RUNNER_TEMP/hlm2-playtest" --no-audit --no-fund playwright@1.62.1
           if ! command -v ffmpeg >/dev/null; then

@@ -2,13 +2,13 @@
 // trackpads ignore taps while keys are held.
 export const defaultBindings = { up: 'w', down: 's', left: 'a', right: 'd', execute: ' ', restart: 'r', attack: 'f', grab: 'e', lock: 'q' };
 const spareKeys = 'fqegzxcvtyuiophjklbnm1234567890';
-export const defaultSettings = { music: true, musicVolume: 70, effectsVolume: 100, shake: true, zoom: 0, censor: false };
+export const defaultSettings = { music: true, musicVolume: 70, effectsVolume: 100, shake: true, zoom: 0, censor: false, easier: true };
 const storageKey = 'hlm2-web-options';
 
 export function normalizeSettings(value = {}) {
   const input = value && typeof value === 'object' ? value : {};
   const out = { ...defaultSettings, bindings: { ...defaultBindings } };
-  for (const name of ['music', 'shake', 'censor']) if (typeof input[name] === 'boolean') out[name] = input[name];
+  for (const name of ['music', 'shake', 'censor', 'easier']) if (typeof input[name] === 'boolean') out[name] = input[name];
   for (const name of ['musicVolume', 'effectsVolume']) if (Number.isFinite(input[name])) out[name] = Math.max(0, Math.min(100, input[name]));
   // 0 fits the game to the window.
   if ([0, 1, 2, 3, 4].includes(input.zoom)) out.zoom = input.zoom;
@@ -65,11 +65,12 @@ export function setupSettings(dialog, onChange, toggleFullscreen, onClose = () =
     $('setting-effects-volume').value = options.effectsVolume;
     $('setting-zoom').value = options.zoom;
     $('setting-shake').checked = options.shake;
+    $('setting-easier').checked = options.easier;
     $('settings-fullscreen').textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Enter fullscreen';
     drawBindings();
   }
   function changed() { options.save(); onChange(); sync(); }
-  for (const [id, name, boolean] of [['setting-music', 'music', true], ['setting-music-volume', 'musicVolume'], ['setting-effects-volume', 'effectsVolume'], ['setting-zoom', 'zoom'], ['setting-shake', 'shake', true]]) {
+  for (const [id, name, boolean] of [['setting-music', 'music', true], ['setting-music-volume', 'musicVolume'], ['setting-effects-volume', 'effectsVolume'], ['setting-zoom', 'zoom'], ['setting-shake', 'shake', true], ['setting-easier', 'easier', true]]) {
     $(id).oninput = e => { options[name] = boolean ? e.target.checked : +e.target.value; changed(); };
   }
   for (const button of dialog.querySelectorAll('[data-tab]')) button.onclick = () => {
