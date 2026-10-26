@@ -725,14 +725,15 @@ export async function play(env) {
   const pg = buildPathGrid(G, room);
 
   // Enemies: objEnemy / objVictim instances, their sprites named after the
-  // idle one. Victim1 has no mask (its sprite's turns with it), so every
-  // enemy uses the player's sprMask box for now.
+  // idle one. Enemies collide with their object's mask (sprMaskEnemy for
+  // most, sprCollisionMaskDog for dogs); maskless ones such as Victim1 use
+  // the player's sprMask box.
   // Mafia and gang sprites are named after the held weapon (sprEMafiaWalkM16),
   // with no idle; `gun` carries the weapon over a knockout. Idle variants
   // (sprEGangIdlePipe) take the base from before Idle.
   const mkEnemy = (obj, x, y, walking, gun) => {
     const o = G.objects.get(obj), sname = G.sprites.get(o.sprite).name, base = sname.replace(/(Idle\w*|Walk\w*)$/, '');
-    const e = { obj, kind: o.name, isEnemy: inherits(G, o, 'objEnemy'), x, y, box, angle: 0, alert: false, frame: 0, imageSpeed: VICTIM1.idleSpeed,
+    const e = { obj, kind: o.name, isEnemy: inherits(G, o, 'objEnemy'), x, y, box: o.mask >= 0 ? maskBox(G, o) : box, angle: 0, alert: false, frame: 0, imageSpeed: VICTIM1.idleSpeed,
       spr: { idle: need(base + 'Idle') || need(sname), walk: need(base + 'Walk'), cower: need(base + 'Idle2'), getUp: need(base + 'GetUp') } };
     e.spr.killBlunt = need(base + 'KillBlunt');
     e.spr.killStomp = need(base + 'KillStomp');

@@ -18,7 +18,7 @@ const MINUTES = +(process.env.MINUTES || 90);
 // Runs in the page. window.__bot drives one game handle at a time.
 function installBot() {
   const VIEW_W = 480, VIEW_H = 270, CELL = 4;
-  const B = window.__bot = { g: null, rooms: [], bugs: [], seen: new Set(), deaths: {}, cur: null, unknownSounds: {} };
+  const B = window.__bot = { g: null, rooms: [], bugs: [], seen: new Set(), placed: new WeakMap(), deaths: {}, cur: null, unknownSounds: {} };
   const play = G.audio.play.bind(G.audio);
   G.audio.play = name => {
     if (B.cur) B.cur.sounds[name] = (B.cur.sounds[name] || 0) + 1;
@@ -254,7 +254,13 @@ function installBot() {
     B.prev = { x: p.x, y: p.y, sprite: p.sprite, exec: !!p.exec, hidden: !!p.sceneHidden };
     for (const e of g.enemies) {
       if (!Number.isFinite(e.x) || !Number.isFinite(e.y)) bug('enemy position not a number', e.kind);
-      else if (e.box && !free(sol, e.box, e.x, e.y)) bug('enemy inside a wall', `${e.kind} ${Math.round(e.x)},${Math.round(e.y)}`);
+      else if (e.box && !free(sol, e.box, e.x, e.y)) {
+        // Some rooms place an enemy a pixel or two into a wall; only report
+        // one that walked into a wall, not one still where the room put it.
+        if (!B.placed.has(e)) B.placed.set(e, { x: e.x, y: e.y });
+        const s = B.placed.get(e);
+        if (!s || Math.hypot(e.x - s.x, e.y - s.y) > 4) bug('enemy inside a wall', `${e.kind} ${Math.round(e.x)},${Math.round(e.y)}`);
+      } else if (!B.placed.has(e)) B.placed.set(e, null);
       if (e.sprite && !B.art.has(e.sprite)) bug('enemy sprite not loaded (invisible)', `${e.kind} ${e.sprite}`);
     }
     for (const k of g.kos) if (k.sprite && !B.art.has(k.sprite)) bug('body sprite not loaded', `${k.obj} ${k.sprite}`);
