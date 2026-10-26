@@ -235,7 +235,7 @@ function installBot() {
     if (!busy && !free(sol, g.box, p.x, p.y)) bug('player inside a wall', `${Math.round(p.x)},${Math.round(p.y)} sprite ${p.sprite}`);
     if (!p.sceneHidden && p.sprite && !B.art.has(p.sprite)) bug('player sprite not loaded (invisible)', p.sprite);
     if (B.prev) {
-      const j = Math.hypot(p.x - B.prev.x, p.y - B.prev.y), skip = B.teleported || p.exec || B.prev.exec || p.ride || p.dead;
+      const j = Math.hypot(p.x - B.prev.x, p.y - B.prev.y), skip = B.teleported || p.exec || B.prev.exec || p.ride || p.dead || B.prev.hidden;
       if (!skip) { cur.maxJump = Math.max(cur.maxJump, j); if (j > 8) bug('player jumped', `${j.toFixed(1)}px to ${Math.round(p.x)},${Math.round(p.y)} sprite ${p.sprite}`); }
       if (p.sprite !== B.prev.sprite) cur.spriteChanges++;
       if (B.prev.exec && !p.exec && j > 10) bug('player snapped after an execution', `${j.toFixed(1)}px to ${Math.round(p.x)},${Math.round(p.y)}`);
@@ -244,7 +244,7 @@ function installBot() {
     B.hist.push(p.sprite); if (B.hist.length > 4) B.hist.shift();
     const h = B.hist;
     if (h.length === 4 && h[0] === h[2] && h[1] === h[3] && h[0] !== h[1] && !p.attack) bug('player sprite flicker', `${h[0]} <-> ${h[1]}`);
-    B.prev = { x: p.x, y: p.y, sprite: p.sprite, exec: !!p.exec };
+    B.prev = { x: p.x, y: p.y, sprite: p.sprite, exec: !!p.exec, hidden: !!p.sceneHidden };
     for (const e of g.enemies) {
       if (!Number.isFinite(e.x) || !Number.isFinite(e.y)) bug('enemy position not a number', e.kind);
       else if (e.box && !free(sol, e.box, e.x, e.y)) bug('enemy inside a wall', `${e.kind} ${Math.round(e.x)},${Math.round(e.y)}`);

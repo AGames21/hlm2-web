@@ -513,6 +513,25 @@ const cellFree = (pg, x, y) => {
   const cx = Math.floor(x / PATH.cell), cy = Math.floor(y / PATH.cell);
   return cx >= 0 && cy >= 0 && cx < pg.cw && cy < pg.ch && !pg.blocked[cy * pg.cw + cx];
 };
+// 4-way step counts over the free cells from (x, y), or, off the grid, from
+// the nearest cell to it; 0 is unreached, so the start counts 1.
+const gridCell = (pg, x, y) => Math.min(pg.ch - 1, Math.max(0, Math.floor(y / PATH.cell))) * pg.cw + Math.min(pg.cw - 1, Math.max(0, Math.floor(x / PATH.cell)));
+function gridReach(pg, x, y) {
+  const { cw, ch, blocked } = pg, dist = new Int32Array(cw * ch), s = gridCell(pg, x, y);
+  let todo = [s]; dist[s] = 1;
+  while (todo.length) {
+    const next = [];
+    for (const i of todo) {
+      const ix = i % cw, iy = (i - ix) / cw;
+      for (const [nx, ny] of [[ix + 1, iy], [ix - 1, iy], [ix, iy + 1], [ix, iy - 1]]) {
+        const j = ny * cw + nx;
+        if (nx >= 0 && ny >= 0 && nx < cw && ny < ch && !dist[j] && !blocked[j]) { dist[j] = dist[i] + 1; next.push(j); }
+      }
+    }
+    todo = next;
+  }
+  return dist;
+}
 // mp_grid_path with diagonals: A* over the cells, a diagonal step only when
 // both cells beside it are free. The path is the start, the cell centres and
 // the goal; null when there is no way.
@@ -993,8 +1012,23 @@ export async function play(env) {
   if (lift) { carry.x = lift.to.x; carry.y = lift.to.y; }
   // A smaller room after a big floor (rmBankVault after the back room) cannot take the carried spot.
   const fits = carry && carry.x >= 0 && carry.y >= 0 && carry.x < room.w && carry.y < room.h;
-  const at = fits ? nearestFree(sol, box, carry.x, carry.y)
+  let at = fits ? nearestFree(sol, box, carry.x, carry.y)
     : nearestFree(sol, box, from ? from.x : room.w >> 1, from ? from.y : room.h >> 1, clear);
+  // A carried spot walled off from every exit (rmLSDFloor4 after rmTigersDen
+  // keeps the last room's spot, outside its walls) moves to the room's marker
+  // when that reaches one, else to the far end of the way to the first exit,
+  // as if walked in from there. A guess: nothing places the player there.
+  const reaches = (q) => { const d = gridReach(pg, q.x, q.y); return exits.some(x => d[gridCell(pg, x.x, x.y)]); };
+  if (fits && exits.length && !reaches(at)) {
+    const mark = from || room.insts.find(i => G.objects.get(i.obj)?.name === 'objLSD');
+    const alt = mark && nearestFree(sol, box, mark.x, mark.y);
+    if (alt && reaches(alt)) at = alt;
+    else {
+      const d = gridReach(pg, exits[0].x, exits[0].y), far = d.reduce((m, v, i) => v > d[m] ? i : m, 0), c = PATH.cell;
+      const q = nearestFree(sol, box, (far % pg.cw + 0.5) * c, (Math.floor(far / pg.cw) + 0.5) * c);
+      if (d[far] > 1 && reaches(q)) at = q;
+    }
+  }
   const p = { x: at.x, y: at.y, hs: 0, vs: 0, aim: 0, dir: 0, frame: 0, sprite: P.walk, attack: null, attackFrame: 0, cooldown: 0, weapon: null, exec: null,
     ammo: 0, barrel: -1, dead: null, roll: null, rollCool: 0, spread: false, flash: 0, punch: 0 };
   if (carry && arm[carry.weapon]) { p.weapon = carry.weapon; p.ammo = carry.ammo; p.sprite = arm[carry.weapon].walk; }
