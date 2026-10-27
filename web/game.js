@@ -445,8 +445,11 @@ export const DOG = { recheck: 10, speed: 4, kill: 22, imageSpeed: 0.1, runImage:
 // one frame per direction (from vars 32/36). Here the direction is taken from
 // the nearest room edge, which is a guess.
 export const EXIT = { objects: ['objNextroom'] };
-// How near the van the player walks to leave the hideout (a guess; the van's own mask is not decoded).
-export const INTRO_VAN_REACH = 48;
+// How near the van the player walks to leave the hideout. Native, after the talk plays
+// through, starts the level between x 136 and 123 at the van's door (van at 96,172):
+// its collision event with the van's mask, which creation code turns to 270.
+// The px of slack around that turned mask:
+export const INTRO_VAN_REACH = 4;
 // objStartPoint (709, no sprite; create 0xbd7800, alarm 0xbd7770, draw
 // 0xbd78f0) marks the jungle and power plant screens, which have no player
 // instance. Its draw shows a blinking sprArrow turned by the room edge once no
@@ -565,18 +568,48 @@ function inherits(G, o, name) {
   return false;
 }
 
-// Rasterise every solid instance's mask into one room-sized grid.
-export function buildSolids(G, room, kinds = ['objSolid'], looping = SLIDING.objects) {
+// What the player walks into: GameMaker's place_free tests every instance with
+// the solid flag, so furniture, cars and loose props block as well as walls
+// (native stops the player on the hideout couch at y 248). Port choice: actors
+// with the flag (NPCs, film crew, elevators) are left out since the port moves
+// or triggers them; enemies keep the wall grid and path round furniture.
+export const BODY = { objects: ['objSolid', 'objFurniture', 'objCar'], skip: ['objDirector', 'objElevator', 'objExplodingElevator'] };
+
+// Rasterise every solid instance's mask into one room-sized grid. With `loose`,
+// parentless objects that have the solid flag count too.
+export function buildSolids(G, room, kinds = ['objSolid'], looping = SLIDING.objects, loose = null) {
   const grid = new Uint8Array(room.w * room.h);
   const put = (x, y) => { if (x >= 0 && y >= 0 && x < room.w && y < room.h) grid[y * room.w + x] = 1; };
   for (const inst of room.insts) {
     const o = G.objects.get(inst.obj);
-    if (!kinds.some(k => inherits(G, o, k))) continue;
+    if (loose?.skip.includes(o?.name)) continue;
+    if (!kinds.some(k => inherits(G, o, k)) && !(loose && o?.solid && !G.objects.get(o.parent))) continue;
     const s = G.sprites.get(o.mask >= 0 ? o.mask : o.sprite);
     if (!s) continue;
     const x0 = inst.x - s.ox, y0 = inst.y - s.oy;
     const m = G.masks.get(s.id);
-    if (m) {
+    const turned = (inst.angle ?? 0) % 360 !== 0 || (inst.xs ?? 1) !== 1 || (inst.ys ?? 1) !== 1;
+    if (turned) {
+      // Placed with an angle or scale: sample the mask at each room pixel.
+      const n = m && looping.includes(o.name) ? m.frames : 1;
+      const hit = (x, y) => {
+        if (x < s.bbox.l || x > s.bbox.r || y < s.bbox.t || y > s.bbox.b) return false;
+        if (!m) return true;
+        for (let f = 0; f < n; f++) if (!(m.bits[(f * m.h + y) * m.stride + (x >> 3)] & (0x80 >> (x & 7)))) return false;
+        return true;
+      };
+      const kx = inst.xs ?? 1, ky = inst.ys ?? 1, c = Math.cos((inst.angle ?? 0) * Math.PI / 180), sn = Math.sin((inst.angle ?? 0) * Math.PI / 180);
+      const loc = (dx, dy) => [(dx * c - dy * sn) / kx + s.ox, (dx * sn + dy * c) / ky + s.oy];
+      const fwd = (lx, ly) => { const px = (lx - s.ox) * kx, py = (ly - s.oy) * ky; return [inst.x + px * c + py * sn, inst.y - px * sn + py * c]; };
+      const cs = [fwd(s.bbox.l, s.bbox.t), fwd(s.bbox.r + 1, s.bbox.t), fwd(s.bbox.l, s.bbox.b + 1), fwd(s.bbox.r + 1, s.bbox.b + 1)];
+      const xa = Math.floor(Math.min(...cs.map(p => p[0]))), xb = Math.ceil(Math.max(...cs.map(p => p[0])));
+      const ya = Math.floor(Math.min(...cs.map(p => p[1]))), yb = Math.ceil(Math.max(...cs.map(p => p[1])));
+      for (let y = ya; y <= yb; y++)
+        for (let x = xa; x <= xb; x++) {
+          const [lx, ly] = loc(x + 0.5 - inst.x, y + 0.5 - inst.y);
+          if (hit(Math.floor(lx), Math.floor(ly))) put(x, y);
+        }
+    } else if (m) {
       const n = looping.includes(o.name) ? m.frames : 1;
       const on = (f, x, y) => m.bits[(f * m.h + y) * m.stride + (x >> 3)] & (0x80 >> (x & 7));
       for (let y = 0; y < m.h; y++)
@@ -747,10 +780,18 @@ const turnToward = (a, t, step) => {
 };
 const approach = (v, to, d) => v < to ? Math.min(v + d, to) : Math.max(v - d, to);
 
-// A mask's box relative to the sprite origin.
-function maskBox(G, o) {
+// A mask's box relative to the sprite origin; with a placed instance, the
+// box around its scaled and rotated corners.
+function maskBox(G, o, inst) {
   const s = G.sprites.get(o.mask >= 0 ? o.mask : o.sprite);
-  return { l: s.bbox.l - s.ox, r: s.bbox.r - s.ox, t: s.bbox.t - s.oy, b: s.bbox.b - s.oy };
+  if (!s) return { l: 0, r: 0, t: 0, b: 0 };
+  const b = { l: s.bbox.l - s.ox, r: s.bbox.r - s.ox, t: s.bbox.t - s.oy, b: s.bbox.b - s.oy };
+  const a = inst?.angle ?? 0, kx = inst?.xs ?? 1, ky = inst?.ys ?? 1;
+  if (a % 360 === 0 && kx === 1 && ky === 1) return b;
+  const c = Math.cos(a * Math.PI / 180), sn = Math.sin(a * Math.PI / 180);
+  const pts = [[b.l, b.t], [b.r, b.t], [b.l, b.b], [b.r, b.b]].map(([x, y]) => [x * kx * c + y * ky * sn, -x * kx * sn + y * ky * c]);
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  return { l: Math.round(Math.min(...xs)), r: Math.round(Math.max(...xs)), t: Math.round(Math.min(...ys)), b: Math.round(Math.max(...ys)) };
 }
 const scaleBox = (b, k) => ({ l: b.l * k, r: b.r * k, t: b.t * k, b: b.b * k });
 const ZERO = { l: 0, r: 0, t: 0, b: 0 };
@@ -819,7 +860,7 @@ export async function play(env) {
   P.deadBlunt = need(pre + 'DeadBlunt') || P.deadShot;
   const bulletSprite = need('sprBullet'), clearedArt = art.get(need(CLEARED.sprite)), leaveSprite = Object.fromEntries(Object.entries(IDLE.leave).map(([k, v]) => [k, need(v.sprite)]));
   const box = maskBox(G, pobj);
-  const sol = buildSolids(G, room);
+  const walls = buildSolids(G, room), sol = buildSolids(G, room, BODY.objects, SLIDING.objects, BODY);
   const pg = buildPathGrid(G, room);
 
   // Enemies: objEnemy / objVictim instances, their sprites named after the
@@ -915,7 +956,10 @@ export async function play(env) {
   // A hub room the player cleared earlier (app.js hubNext) comes back as they
   // left it: no enemies, its bodies and loose weapons where they lay.
   const saved = env.carry?.level?.rooms?.[room.name];
-  const enemies = saved ? [] : room.insts.filter(i => isEnemy(G.objects.get(i.obj))).map(i => Object.assign(mkEnemy(i.obj, i.x, i.y), { inst: i }));
+  // Creation code may set the held weapon's sprite (sprColombianWalkShotgun)
+  // and the facing (direction, else image_angle).
+  const enemies = saved ? [] : room.insts.filter(i => isEnemy(G.objects.get(i.obj))).map(i =>
+    Object.assign(mkEnemy(i.obj, i.x, i.y, false, (i.spr?.match(/Walk(\w+)$/) || [])[1]), { inst: i, angle: i.dir ?? i.angle ?? 0 }));
   // The couple counts as an enemy until it splits; the two it becomes are made
   // now so their sprites load.
   for (const i of saved ? [] : room.insts.filter(i => G.objects.get(i.obj)?.name === COUPLE.obj)) {
@@ -938,7 +982,7 @@ export async function play(env) {
   const bosses = room.insts.filter(i => BOSS[G.objects.get(i.obj)?.name]).map(i => {
     const kind = G.objects.get(i.obj).name, d = BOSS[kind];
     for (const n of Object.values(d.k.spr)) need(n);
-    return { inst: i, kind, x: i.x, y: i.y, box: G.objects.get(i.obj).sprite >= 0 ? maskBox(G, G.objects.get(i.obj)) : ZERO, state: 0, frame: 0, hs: 0, vs: 0, angle: 0, ...d.make() };
+    return { inst: i, kind, x: i.x, y: i.y, box: G.objects.get(i.obj).sprite >= 0 ? maskBox(G, G.objects.get(i.obj), i) : ZERO, state: 0, frame: 0, hs: 0, vs: 0, angle: 0, ...d.make() };
   });
   const bossEnter = bosses.map(b => BOSS[b.kind].k.enter).find(Boolean);
 
@@ -949,7 +993,7 @@ export async function play(env) {
     return o && (inherits(G, o, 'objWeapon') ? arm[o.name.slice(3)] : arm[WALL_GUNS[o.name]?.name]);
   }).map(i => {
     const o = G.objects.get(i.obj), wall = WALL_GUNS[o.name], name = wall ? wall.name : o.name.slice(3);
-    return { inst: i, name, x: i.x, y: i.y, angle: 0, speed: 0, dir: 0, ammo: wall ? wall.ammo : GUNS[name]?.ammo ?? 0,
+    return { inst: i, name, x: i.x, y: i.y, angle: i.angle ?? 0, speed: 0, dir: 0, ammo: wall ? wall.ammo : GUNS[name]?.ammo ?? 0,
       wall: !!wall, sprite: need(G.sprites.get(G.objects.get(i.obj).sprite).name) };
   });
   const looseSprite = Object.fromEntries(weapons.filter(w => !w.wall).map(w => [w.name, w.sprite]));
@@ -1031,7 +1075,10 @@ export async function play(env) {
   // Native: in the Fans' hideout the talk ends with the player free; the scene
   // goes on when they walk to the van (objFansVan).
   const van = env.intro && room.insts.find(i => G.objects.get(i.obj)?.name === 'objFansVan');
-  let vanWait = false;
+  // With no talk in the data the van is open from the start.
+  let vanWait = !!van && !talks.length;
+  const vanBox = van && maskBox(G, G.objects.get(van.obj), van);
+  const atVan = () => overlap(p, box, van, { l: vanBox.l - INTRO_VAN_REACH, r: vanBox.r + INTRO_VAN_REACH, t: vanBox.t - INTRO_VAN_REACH, b: vanBox.b + INTRO_VAN_REACH });
   // The date card (objDate); see DATE_CARD.
   let card = DATES[room.id] && G.text?.[DATES[room.id][0]] ? { row: DATES[room.id], off: DATE_CARD.from, hold: DATE_CARD.hold, veil: DATE_CARD.veil } : null;
   function stepCard() {
@@ -1077,7 +1124,7 @@ export async function play(env) {
     if (env.cutscene && !env.cutscene.done || p.dead) return;
     if (!talks.length) {
       if (env.cutscene) { env.cutscene = null; if (van) vanWait = true; else env.talkDone?.(); }
-      if (vanWait && Math.hypot(p.x - van.x, p.y - van.y) <= INTRO_VAN_REACH) { vanWait = false; env.talkDone?.(); }
+      if (vanWait && atVan()) { vanWait = false; env.talkDone?.(); }
       return;
     }
     const t = talks[0];
@@ -1199,8 +1246,9 @@ export async function play(env) {
   const onKey = (e) => {
     if (env.paused?.()) return;
     if (e.type === 'keydown' && (e.target.closest?.('input, select, textarea, button') || e.target.isContentEditable)) return;
-    const k = gameKey(e.key);
-    if (!['w', 'a', 's', 'd', ' ', 'r', 'f', 'e', 'q', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) return;
+    // Enter advances a talk box as in native; it is not rebindable.
+    const k = e.key === 'Enter' ? 'enter' : gameKey(e.key);
+    if (!['enter', 'w', 'a', 's', 'd', ' ', 'r', 'f', 'e', 'q', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) return;
     e.preventDefault();
     if (e.type === 'keydown' && !e.repeat) pressed.add(k);
     e.type === 'keydown' ? keys.add(k) : keys.delete(k);
@@ -1250,7 +1298,7 @@ export async function play(env) {
   const attacking = () => !!p.attack;
   const solidAt = (x, y) => {
     const xx = Math.round(x), yy = Math.round(y);
-    return xx < 0 || yy < 0 || xx >= sol.w || yy >= sol.h || sol.grid[yy * sol.w + xx] === 1;
+    return xx < 0 || yy < 0 || xx >= walls.w || yy >= walls.h || walls.grid[yy * walls.w + xx] === 1;
   };
   // Line of sight: sample the wall grid every 4px. A door leaf blocks it
   // too, so nobody sees through a shut door.
@@ -1480,7 +1528,7 @@ export async function play(env) {
   // objWeapon step plus its enemy and wall collisions.
   function stepWeapon(w) {
     if (w.speed <= 0) return;
-    const mx = moveAxis(sol, wbox, w, 'x', lenX(w.speed, w.dir)), my = moveAxis(sol, wbox, w, 'y', lenY(w.speed, w.dir));
+    const mx = moveAxis(walls, wbox, w, 'x', lenX(w.speed, w.dir)), my = moveAxis(walls, wbox, w, 'y', lenY(w.speed, w.dir));
     if (!mx && lenX(w.speed, w.dir)) { w.dir = (540 - w.dir) % 360; w.speed *= WEAPON.bounce; }
     if (!my && lenY(w.speed, w.dir)) { w.dir = (360 - w.dir) % 360; w.speed *= WEAPON.bounce; }
     for (const e of [...enemies])
@@ -1601,8 +1649,8 @@ export async function play(env) {
         e.imageSpeed = speed * ENEMY.wanderAnim;
         if (!speed) e.frame = 0;
       }
-      if (!free(sol, e.box, e.x + e.hs * ENEMY.ahead, e.y)) e.hs = -e.hs;
-      if (!free(sol, e.box, e.x, e.y + e.vs * ENEMY.ahead)) e.vs = -e.vs;
+      if (!free(walls, e.box, e.x + e.hs * ENEMY.ahead, e.y)) e.hs = -e.hs;
+      if (!free(walls, e.box, e.x, e.y + e.vs * ENEMY.ahead)) e.vs = -e.vs;
     } else {
       const see = spots(e);
       if (see) e.seen = { x: p.x, y: p.y };
@@ -1622,8 +1670,8 @@ export async function play(env) {
         if (d <= ENEMY.hold && !(e.hs || e.vs)) {
           if (d < ENEMY.near) {
             const bx = lenX(ENEMY.backOff, dir + 180), by = lenY(ENEMY.backOff, dir + 180);
-            if (free(sol, e.box, e.x + bx, e.y)) e.x += bx;
-            if (free(sol, e.box, e.x, e.y + by)) e.y += by;
+            if (free(walls, e.box, e.x + bx, e.y)) e.x += bx;
+            if (free(walls, e.box, e.x, e.y + by)) e.y += by;
           }
           e.angle = turnToward(e.angle, dir, options.easier ? EASY.turn : ENEMY.turn);
         }
@@ -1643,7 +1691,7 @@ export async function play(env) {
         // player, made again every 20 steps.
         e.hs = e.vs = 0;
         const chase = (e.dog ? DOG.speed : ENEMY.chaseSpeed) * (options.easier ? EASY.chase : 1);
-        if (see && d > 2 && free(sol, e.box, e.x + lenX(chase, dir), e.y + lenY(chase, dir))) {
+        if (see && d > 2 && free(walls, e.box, e.x + lenX(chase, dir), e.y + lenY(chase, dir))) {
           e.path = null;
           e.hs = lenX(chase, dir); e.vs = lenY(chase, dir);
           e.angle = dir;
@@ -1671,13 +1719,13 @@ export async function play(env) {
     // walls. Port choice: the path step slides on walls instead (a blocked
     // chaser asks for a new path), and only a body already in a wall moves
     // freely, to get out.
-    if (e.path && !free(sol, e.box, e.x, e.y)) { e.x += e.hs; e.y += e.vs; }
+    if (e.path && !free(walls, e.box, e.x, e.y)) { e.x += e.hs; e.y += e.vs; }
     else if (e.path) {
-      const mx = moveAxis(sol, e.box, e, 'x', e.hs, CORNER), my = moveAxis(sol, e.box, e, 'y', e.vs, CORNER);
+      const mx = moveAxis(walls, e.box, e, 'x', e.hs, CORNER), my = moveAxis(walls, e.box, e, 'y', e.vs, CORNER);
       if (!mx && !my) e.repath = 0;
     } else {
-      if (!moveAxis(sol, e.box, e, 'x', e.hs, CORNER) && e.alert) e.hs = 0;
-      if (!moveAxis(sol, e.box, e, 'y', e.vs, CORNER) && e.alert) e.vs = 0;
+      if (!moveAxis(walls, e.box, e, 'x', e.hs, CORNER) && e.alert) e.hs = 0;
+      if (!moveAxis(walls, e.box, e, 'y', e.vs, CORNER) && e.alert) e.vs = 0;
     }
     if (!e.alert && (e.hs || e.vs)) e.angle = e.moveDir;
     if (e.hs || e.vs) e.legFrame += ENEMY.legsSpeed;
@@ -1838,8 +1886,8 @@ export async function play(env) {
       const goal = door ? { x: door.x, y: door.y + VICTIM1.targetDy } : { x: 2 * e.x - p.x, y: 2 * e.y - p.y };
       if (dist(e, goal) <= VICTIM1.speed) { e.sprite = e.spr.idle; e.imageSpeed = VICTIM1.idleSpeed; return; }
       const dir = pointDir(e.x, e.y, goal.x, goal.y);
-      moveAxis(sol, e.box, e, 'x', lenX(VICTIM1.speed, dir), CORNER);
-      moveAxis(sol, e.box, e, 'y', lenY(VICTIM1.speed, dir), CORNER);
+      moveAxis(walls, e.box, e, 'x', lenX(VICTIM1.speed, dir), CORNER);
+      moveAxis(walls, e.box, e, 'y', lenY(VICTIM1.speed, dir), CORNER);
       if (e.sprite !== e.spr.walk) e.frame = 0;
       e.sprite = e.spr.walk; e.imageSpeed = VICTIM1.walkSpeed; e.angle = dir;
     } else {
@@ -1905,7 +1953,7 @@ export async function play(env) {
   // The body stops at walls; KnockedOut_step's own wall handling is not read yet.
   function stepKO(k) {
     if (k.speed > 0) {
-      const mx = moveAxis(sol, k.box, k, 'x', lenX(k.speed, k.dir)), my = moveAxis(sol, k.box, k, 'y', lenY(k.speed, k.dir));
+      const mx = moveAxis(walls, k.box, k, 'x', lenX(k.speed, k.dir)), my = moveAxis(walls, k.box, k, 'y', lenY(k.speed, k.dir));
       k.speed = (mx || my) ? Math.max(0, k.speed - KO.friction) : 0;
     }
     if (k.alarm > 0) {
@@ -1928,7 +1976,7 @@ export async function play(env) {
   };
   const touches = (d, o, ob) => doorPoints(d).some(q =>
     q.x >= o.x + ob.l - 2 && q.x <= o.x + ob.r + 2 && q.y >= o.y + ob.t - 2 && q.y <= o.y + ob.b + 2);
-  const hitsWall = (d) => doorPoints(d, 4, DOOR.length - 2).some(q => sol.grid[Math.round(q.y) * sol.w + Math.round(q.x)]);
+  const hitsWall = (d) => doorPoints(d, 4, DOOR.length - 2).some(q => walls.grid[Math.round(q.y) * walls.w + Math.round(q.x)]);
   // A push turns the door so its free end moves away from whoever pushed.
   // The exe picks the sign from quadrant tests; this is the same intent.
   function pushDoor(d, o, byPlayer) {
@@ -2056,7 +2104,7 @@ export async function play(env) {
       if (--b.timer <= 0) Object.assign(b, { state: 0, speed: 0, wait: K.rest, timer: K.walk.time, sprite: K.spr.walk });
     }
     b.hs = lenX(b.speed, b.angle); b.vs = lenY(b.speed, b.angle);
-    moveAxis(sol, b.box, b, 'x', b.hs); moveAxis(sol, b.box, b, 'y', b.vs);
+    moveAxis(walls, b.box, b, 'x', b.hs); moveAxis(walls, b.box, b, 'y', b.vs);
     b.frame %= frames(b.sprite);
     if (bossHit(b, K.reach)) bossDies(b, K.spr.dead, K.body.speed, K.body.friction);
     else if (overlap(b, b.box, p, box)) {

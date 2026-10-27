@@ -117,3 +117,22 @@ test('date card line uses 0-based months and the exe day suffixes', () => {
   assert.equal(dateLine(1985, 11, 22), 'DEC 22ND, 1985');
   assert.equal(dateLine(1985, 2, 3), 'MAR 3RD, 1985');
 });
+
+test('The player grid holds solid-flag furniture and props; the wall grid does not', async () => {
+  const { buildSolids, BODY } = await import('../web/game.js');
+  const objects = new Map([
+    [0, { id: 0, name: 'objSolid', parent: -1, mask: -1, sprite: 0, solid: 1 }],
+    [1, { id: 1, name: 'objFurniture', parent: -1, mask: -1, sprite: -1, solid: 1 }],
+    [2, { id: 2, name: 'objCouch', parent: 1, mask: -1, sprite: 0, solid: 1 }],
+    [3, { id: 3, name: 'objTrashbag', parent: -1, mask: -1, sprite: 0, solid: 1 }],
+    [4, { id: 4, name: 'objDirector', parent: -1, mask: -1, sprite: 0, solid: 1 }],
+    [5, { id: 5, name: 'objRug', parent: -1, mask: -1, sprite: 0, solid: 0 }],
+  ]);
+  const sprite = { id: 0, ox: 0, oy: 0, bbox: { l: 0, r: 3, t: 0, b: 3 } };
+  const G = { objects, sprites: new Map([[0, sprite]]), masks: new Map() };
+  const room = { w: 64, h: 8, insts: [[0, 0], [2, 10], [3, 20], [4, 30], [5, 40]].map(([obj, x]) => ({ obj, x, y: 0 })) };
+  const at = (g, x) => g.grid[x];
+  const walls = buildSolids(G, room), body = buildSolids(G, room, BODY.objects, [], BODY);
+  assert.deepEqual([0, 10, 20, 30, 40].map(x => at(walls, x)), [1, 0, 0, 0, 0]);
+  assert.deepEqual([0, 10, 20, 30, 40].map(x => at(body, x)), [1, 1, 1, 0, 0]);
+});

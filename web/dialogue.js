@@ -39,8 +39,8 @@ export function conversation(G, pages, { drawFace, onEnd, fonts = {} } = {}) {
   }
   if (!boxes.length) return null;
   let i = 0, shown = 0, done = false, bars = 0, closing = false, faceFrame = 0, clock = 0, held = 0;
-  // The game only passes movement keys and Space through; Enter skips the scene.
-  const press = s => s.pressed.has(' ') || s.mouse.click;
+  // Native advances a box on left click or Enter; Space does nothing here.
+  const press = s => s.pressed.has('enter') || s.mouse.click;
   const text = fonts.text, skipText = t(TALK.skip.text);
   const width = r => text ? textWidth(text, r) : r.length * 7;
   const put = (cx, r, x, y, colour) => {

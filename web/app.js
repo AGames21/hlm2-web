@@ -3,6 +3,7 @@
 // depth first).
 import { Wad } from './agar.js';
 import * as T from './tables.js';
+import { INSTCC } from './instcc.js';
 import { play, musicFor, SOUND } from './game.js';
 import { Audio, RemoteFile } from './audio.js';
 import { scoreScreen } from './score.js';
@@ -105,6 +106,12 @@ async function openGame(blob, progress = status) {
     // Optional: without the text file, talk scenes and date cards are skipped.
     text: await wad.bytes('Assets/hlm2_localization.bin').then(b => T.localization(b), () => []),
   };
+  // Instance creation code: the placed angle, scale, frame, direction and sprite.
+  for (const r of game.rooms.list)
+    r.insts.forEach((inst, k) => {
+      const c = INSTCC[r.id]?.[k];
+      Object.assign(inst, { angle: c?.a ?? 0, xs: c?.xs ?? 1, ys: c?.ys ?? 1, index: c?.i ?? 0, dir: c?.d, spr: c?.s });
+    });
   // Index every atlas frame by sprite name: name -> [{atlas, frames}].
   const metas = wad.names('Atlases/').filter(n => n.endsWith('.meta'));
   for (let i = 0; i < metas.length; i += 64) {
@@ -152,12 +159,13 @@ async function roomItems(room, showHidden) {
   for (const inst of room.insts) {
     const o = G.objects.get(inst.obj);
     if (!o || ((!o.visible || OVERLAY.test(o.name)) && !showHidden)) continue;
-    const s = G.sprites.get(o.sprite);
+    const s = (inst.spr && G.sprites.list.find(x => x.name === inst.spr)) || G.sprites.get(o.sprite);
     if (!s) continue;
     const hit = findFrames(s.name, levelAtlas);
     if (!hit) { missing++; continue; }
-    const f = hit.frames[0];
-    items.push({ inst, depth: o.depth, atlas: hit.atlas, sx: f.x, sy: f.y, w: f.w, h: f.h, dx: inst.x - s.ox, dy: inst.y - s.oy });
+    const f = hit.frames[Math.floor(inst.index) % hit.frames.length] || hit.frames[0];
+    items.push({ inst, depth: o.depth, atlas: hit.atlas, sx: f.x, sy: f.y, w: f.w, h: f.h, dx: inst.x - s.ox, dy: inst.y - s.oy,
+      ...(inst.angle || inst.xs !== 1 || inst.ys !== 1) && { x: inst.x, y: inst.y, ox: s.ox, oy: s.oy, angle: inst.angle, xs: inst.xs, ys: inst.ys } });
   }
   items.sort((a, b) => b.depth - a.depth);
 
@@ -382,7 +390,7 @@ async function runScene(i, skipIntro = false) {
   if (room) {
     story = { i, intro: true };
     if (await startPlay(room.name, null, s.introTrack)) {
-      status(`${s.scene} ${s.title}: Space or click moves the talk on; Enter skips to the level; Esc returns to the menu.`);
+      status(`${s.scene} ${s.title}: click or Enter moves the talk on; hold right mouse to skip it; walk to the van to start the level; Esc returns to the menu.`);
     }
   } else startLevel();
 }
@@ -651,7 +659,6 @@ addEventListener('keydown', e => {
   if ($('settings-dialog').open) return;
   if (e.target.closest?.('input, select, textarea, button') || e.target.isContentEditable) return;
   if (e.key === 'Escape' && game) story ? showMenu() : showSelected();
-  if (e.key === 'Enter' && game && story?.intro) { e.preventDefault(); startLevel(); }
 });
 $('menu').onclick = () => G && showMenu();
 $('filter').oninput = () => G && fillRooms();

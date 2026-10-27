@@ -59,6 +59,7 @@ function rooms() {
     // The second floor deliberately has no player instance.
     const instances = [[3, 160, 135], [4, 440, 135], [6, 300, 90], [8, 100, 170], [9, 125, 170]];
     if (id !== 1) instances.unshift([1, 100, 135]);
+    if (name === 'rmFansHeadQuarters') instances.push([10, 96, 172]);
     const instanceBytes = instances.map(([obj, x, y], index) => { const b = Buffer.alloc(12); b.writeUInt16LE(index); b.writeUInt16LE(obj, 6); b.writeInt16LE(x, 8); b.writeInt16LE(y, 10); return b; });
     const backgrounds = Buffer.alloc(164); backgrounds.writeUInt32LE(8);
     const nameBytes = Buffer.from(name + '\0'); const at = nameOffset; nameOffset += nameBytes.length; names.push(nameBytes);
@@ -86,8 +87,8 @@ function wav() {
 
 function dataWad() {
   const spriteRows = spriteNames.map((name, id) => [name, [id, 8, 8, 4, 4, 0, 7, 0, 7, spriteFrames(name), 0, 0, 0, 0, 0, 0]]);
-  const objectNames = ['objPlayer', 'objPigButcher', 'objEnemy', 'objTarget', 'objNextroom', 'objSolid', 'objWall', 'objWeapon', 'objBat', 'obj9mm'];
-  const sprites = [-1, 0, -1, 4, 8, -1, 8, -1, 10, 13], parents = [-1, 0, -1, 2, -1, -1, 5, -1, 7, 7];
+  const objectNames = ['objPlayer', 'objPigButcher', 'objEnemy', 'objTarget', 'objNextroom', 'objSolid', 'objWall', 'objWeapon', 'objBat', 'obj9mm', 'objFansVan'];
+  const sprites = [-1, 0, -1, 4, 8, -1, 8, -1, 10, 13, -1], parents = [-1, 0, -1, 2, -1, -1, 5, -1, 7, 7, -1];
   const objectRows = objectNames.map((name, id) => [name, [id, sprites[id], id === 4 ? -101 : 0, parents[id], sprites[id], id === 6 ? 1 : 0, 1, 0, 0, 0, 0]]);
   const sounds = ['sndSwing1', 'sndSwing2', 'sndPunch', 'sndHit', 'sndWeaponPickup', 'sndWeaponThrow', 'snd9mm'];
   return archive([

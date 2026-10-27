@@ -183,7 +183,7 @@ function installBot() {
   function botInput(g) {
     const p = g.player, keys = g.keys, mouse = g.mouse;
     keys.clear();
-    if (g.talking()) { if (B.cur.steps % 8 === 0) g.pressed.add(' '); return; }
+    if (g.talking()) { if (B.cur.steps % 8 === 0) g.pressed.add('enter'); return; }
     if (p.dead) {
       if (B.deadFor === 0) {
         const near = [...g.enemies, ...g.bosses].map(e => ({ kind: e.kind, d: Math.round(Math.hypot(e.x - p.x, e.y - p.y)), gun: e.g?.sound || null, sprite: e.sprite })).sort((a, b) => a.d - b.d)[0];

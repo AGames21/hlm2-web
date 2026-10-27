@@ -394,9 +394,13 @@ async function punchAndFinish(page) {
       assert.doesNotMatch(await page.locator('#status').textContent(), /MIDNIGHT ANIMAL cleared/);
       for (let i = 0; i < 2; i++) { await delay(450); await page.keyboard.press('Space'); }
       await page.waitForFunction(() => window.game?.room === 'rmFansHeadQuarters');
-      assert.match(await page.locator('#status').textContent(), /Enter skips to the level/);
+      assert.match(await page.locator('#status').textContent(), /walk to the van to start the level/);
       assert.equal(await page.evaluate(() => +localStorage.getItem('hlm2-web-progress')), 1);
-      await page.keyboard.press('Enter');
+      // As in native: Enter moves the talk on, then the level starts at the van's door.
+      await page.waitForFunction(() => window.game?.talking() || window.game?.talks.length === 0, null, { timeout: 15000 });
+      for (let i = 0; i < 80 && await page.evaluate(() => window.game.talking()); i++) { await delay(200); await page.keyboard.press('Enter'); }
+      assert.equal(await page.evaluate(() => window.game.room), 'rmFansHeadQuarters');
+      await page.evaluate(() => { const p = window.game.player; p.x = 100; p.y = 172; });
       await page.waitForFunction(() => window.game?.room === 'rmFansLevel1Floor1', null, { timeout: 20000 });
     });
     await check('No uncaught browser exceptions across the integrated workflow', async () => assert.deepEqual(errors, []));
