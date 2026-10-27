@@ -511,6 +511,12 @@ export const BLOOD = { splats: ['sprSplat1', 'sprSplat2', 'sprSplat3', 'sprSplat
   scaleMin: 0.8, scaleRand: 0.4, imageSpeed: 0.15, count: 4, spread: 30, speedMin: 1, speedRand: 4, friction: 0.25 };
 // Camera: the view leads toward the mouse (a guess at objCamera's step).
 export const CAMERA = { lead: 0.5, max: 22, ease: 0.15 };
+// During a talk the native view sits on whoever speaks: the view's top-left per
+// portrait, matched pixel for pixel against native frames (the fans share one
+// couch object, objFansInCouch at 456,208, so this is per room).
+export const TALK_CAMERA = {
+  rmFansHeadQuarters: { sprMaskTiger: [291, 72], sprMaskSwan2: [268, 71], sprMaskZebra: [310, 72], sprMaskBear: [249, 71] },
+};
 
 // The Pilot's night (rmTutorialFloor1), matched to the native game: a dark red
 // backdrop instead of the wash, the world multiplied down and reddened, a soft
@@ -2119,6 +2125,13 @@ export async function play(env) {
       const [fx, fy] = film.arrived ? FILM_SET.centre : [film.x, film.y];
       const tx = fx - VIEW_W / 2, ty = fy - VIEW_H / 2, k = film.arrived ? FILM_SET.ease : 1;
       cam.fx = (cam.fx ?? tx) + (tx - (cam.fx ?? tx)) * k; cam.fy = (cam.fy ?? ty) + (ty - (cam.fy ?? ty)) * k;
+      cam.x = Math.round(cam.fx); cam.y = Math.round(cam.fy);
+      return;
+    }
+    const spot = env.cutscene && !env.cutscene.done && TALK_CAMERA[room.name]?.[env.cutscene.face];
+    if (spot) {
+      const [tx, ty] = spot;
+      cam.fx = (cam.fx ?? tx) + (tx - (cam.fx ?? tx)) * ease; cam.fy = (cam.fy ?? ty) + (ty - (cam.fy ?? ty)) * ease;
       cam.x = Math.round(cam.fx); cam.y = Math.round(cam.fy);
       return;
     }

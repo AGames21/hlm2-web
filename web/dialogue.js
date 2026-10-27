@@ -50,6 +50,7 @@ export function conversation(G, pages, { drawFace, onEnd, fonts = {} } = {}) {
   return {
     get done() { return done; },
     get index() { return i; },
+    get face() { return boxes[Math.min(i, boxes.length - 1)].face; },
     count: boxes.length,
     step(s) {
       if (done) return false;
