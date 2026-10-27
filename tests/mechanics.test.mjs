@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture, mouse } from './helpers/game-fixture.mjs';
-import { BEAR, PRISON } from '../web/game.js';
+import { BEAR, PRISON, dateLine } from '../web/game.js';
 
 test('A thrown weapon knocks a target down and leaves the player unarmed', async t => {
   const { game, canvas } = await fixture({ weapons: true, carry: { x: 240, y: 135, weapon: 'Bat', ammo: 0 } });
@@ -110,3 +110,10 @@ for (const [kind, config] of [['objBearBoss', BEAR], ['objPrisonBoss', PRISON]])
     assert.equal(game.bosses.length, 0); assert.equal(game.stats.kills, 1);
   });
 }
+
+test('date card line uses 0-based months and the exe day suffixes', () => {
+  assert.equal(dateLine(1991, 9, 31), 'OCT 31ST, 1991');
+  assert.equal(dateLine(1985, 0, 11), 'JAN 11TH, 1985');
+  assert.equal(dateLine(1985, 11, 22), 'DEC 22ND, 1985');
+  assert.equal(dateLine(1985, 2, 3), 'MAR 3RD, 1985');
+});

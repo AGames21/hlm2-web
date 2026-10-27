@@ -16,9 +16,17 @@ import { conversation, TALK } from './dialogue.js';
 import { DATES } from './dates.js';
 import { SON_BOSS_WHO, sonBossDefinitions, stepSonBoss, hitSonBoss } from './bosses.js';
 
-// Date card layout is a guess; the fade step is from objDate draw 0x6ca7d0.
-export const DATE_CARD = { hold: 180, fade: 0.01, margin: 8, line: 16, font: 'bold 13px monospace' };
-const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+// Date card (objDate), measured against native frames at 480x270: a near
+// black veil, the time in fntTime red at y 100, a white rule at 135 and the
+// date and place in fntDate under it. The time slides in from above and the
+// text from below (offset 120 down by 7 a frame), then the rule reaches full
+// width; it holds, then slides out twice as fast while the veil fades.
+export const DATE_CARD = { veil: 0.96, time: 100, rule: 135, ruleW: 107, text: 140, line: 12, from: 120, in: 7, hold: 100, out: 14, fade: 0.11,
+  clock: 'rgb(255,30,30)' };
+// Month names and day suffixes as the exe builds them (months are 0-based).
+const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+export const daySuffix = d => ({ 1: 'ST', 2: 'ND', 3: 'RD', 21: 'ST', 22: 'ND', 23: 'RD', 31: 'ST' })[d] || 'TH';
+export const dateLine = (y, mo, d) => `${MONTHS[mo]} ${d}${daySuffix(d)}, ${y}`;
 
 export const MOVE = { accel: 0.5, maxSpeed: 3, friction: 0.5, diagSlack: 2, diagScale: 0.98, animSpeed: 0.25 };
 const VIEW_W = 480, VIEW_H = 270, STEP_MS = 1000 / 60;
@@ -1024,20 +1032,31 @@ export async function play(env) {
   // goes on when they walk to the van (objFansVan).
   const van = env.intro && room.insts.find(i => G.objects.get(i.obj)?.name === 'objFansVan');
   let vanWait = false;
-  // The date card (objDate): place, date and time over a black backing,
-  // held, then faded out by 0.01 a frame (draw 0x6ca7d0).
-  let card = DATES[room.id] && G.text?.[DATES[room.id][0]] ? { row: DATES[room.id], hold: DATE_CARD.hold, alpha: 1 } : null;
+  // The date card (objDate); see DATE_CARD.
+  let card = DATES[room.id] && G.text?.[DATES[room.id][0]] ? { row: DATES[room.id], off: DATE_CARD.from, hold: DATE_CARD.hold, veil: DATE_CARD.veil } : null;
+  function stepCard() {
+    if (card.hold > 0 && card.off > 0) card.off = Math.max(0, card.off - DATE_CARD.in);
+    else if (card.hold > 0) card.hold--;
+    else {
+      card.off += DATE_CARD.out;
+      if ((card.veil -= DATE_CARD.fade) <= 0) card = null;
+    }
+  }
   function drawCard() {
-    const [id, y, mo, d, h, mi] = card.row, m = DATE_CARD.margin;
-    const rows = [G.text[id], `${MONTHS[mo - 1]} ${d}, ${y}`, `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`];
+    const [id, y, mo, d, h, mi] = card.row, D = DATE_CARD, mid = VIEW_W / 2, off = card.off;
+    const rows = [dateLine(y, mo, d), G.text[id]];
     cx.save();
-    cx.globalAlpha = Math.min(1, card.alpha);
-    cx.font = DATE_CARD.font;
-    cx.textBaseline = 'top';
-    const w = Math.max(...rows.map(r => cx.measureText(r).width)) + m * 2, hgt = rows.length * DATE_CARD.line + m * 2;
-    const x0 = m, y0 = VIEW_H - hgt - m;
-    cx.fillStyle = '#000'; cx.fillRect(x0, y0, w, hgt);
-    rows.forEach((r, k) => { cx.fillStyle = k ? '#fff' : '#ff2ad4'; cx.fillText(r, x0 + m, y0 + m + k * DATE_CARD.line); });
+    cx.fillStyle = `rgba(0,0,0,${Math.max(0, card.veil)})`;
+    cx.fillRect(0, 0, VIEW_W, VIEW_H);
+    const put = (f, t, yy, colour, css) => f ? drawText(cx, f, t, mid, yy, { align: 0.5, colour })
+      : (cx.font = css, cx.textAlign = 'center', cx.textBaseline = 'top', cx.fillStyle = colour, cx.fillText(t, mid, yy));
+    put(dateFonts.time, `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`, D.time - off, D.clock, 'bold 30px monospace');
+    const w = Math.round(D.ruleW * Math.max(0, 1 - off / D.from));
+    if (w > 0) {
+      cx.fillStyle = 'rgb(247,247,247)'; cx.fillRect(Math.round(mid - w / 2), D.rule, w, 1);
+      cx.fillStyle = 'rgb(119,119,119)'; cx.fillRect(Math.round(mid - w / 2), D.rule + 1, w, 1);
+    }
+    rows.forEach((r, k) => put(dateFonts.date, r, D.text + off + k * D.line, '#fff', 'bold 11px monospace'));
     cx.restore();
   }
   let talkClock = 0;
@@ -1052,6 +1071,8 @@ export async function play(env) {
     return Math.round(f.w * k);
   };
   function stepTalk() {
+    // Native opens no talk until the date card has gone.
+    if (card) return;
     talkClock++;
     if (env.cutscene && !env.cutscene.done || p.dead) return;
     if (!talks.length) {
@@ -1173,6 +1194,7 @@ export async function play(env) {
   const night = NIGHT.room.test(room.name), floor2 = FLOOR2_HINT.room.test(room.name);
   const hint = (night || floor2) && G.text?.[NIGHT.hint.text] ? { font: await loadFont(G, NIGHT.hint.font), kills: stats.kills } : null;
   const restartFont = G.text?.[RESTART.text] ? await loadFont(G, RESTART.font) : null;
+  const dateFonts = card ? { time: await loadFont(G, 'fntTime'), date: await loadFont(G, 'fntDate') } : {};
   const talkFonts = G.text ? { text: await loadFont(G, TALK.fontName), skip: await loadFont(G, TALK.skip.font) } : {};
   const onKey = (e) => {
     if (env.paused?.()) return;
@@ -2054,7 +2076,7 @@ export async function play(env) {
     if (pressed.has('q')) lockOn();
     // A cutscene (dialogue box) holds the room still and eats the input.
     stepTalk();
-    if (card) { if (card.hold > 0) card.hold--; else if ((card.alpha -= DATE_CARD.fade) <= 0) card = null; }
+    if (card) stepCard();
     if (env.cutscene?.step({ pressed, mouse, player: p })) { pressed.clear(); mouse.click = mouse.right = false; moveCamera(CAMERA.ease); return; }
     if (film) stepFilm();
     else if (!p.dead) stats.steps++;
