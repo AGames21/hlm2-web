@@ -1207,7 +1207,7 @@ export async function play(env) {
   const popups = [], pieces = [];
   const award = (pts, x, y) => {
     stats.score += pts;
-    popups.push({ text: pts + 'pts', x, y, t: POINTS.popup });
+    popups.push({ text: pts + 'PTS', x, y, t: POINTS.popup });
   };
   // With no player instance the player gets out of the level's car (objCar's
   // children, e.g. objFansVan), as in play footage: a step toward the room's
@@ -2318,10 +2318,13 @@ export async function play(env) {
     cx.save();
     cx.font = 'bold 10px monospace';
     cx.textAlign = 'center';
+    // Popups use the score font at half size, white over a black step, as native does.
     for (const u of popups) {
       cx.globalAlpha = Math.min(1, u.t / 20);
-      cx.fillStyle = '#000'; cx.fillText(u.text, Math.round(u.x - cam.x) + 1, Math.round(u.y - cam.y) + 1);
-      cx.fillStyle = '#fff'; cx.fillText(u.text, Math.round(u.x - cam.x), Math.round(u.y - cam.y));
+      const px = Math.round(u.x - cam.x), py = Math.round(u.y - cam.y);
+      if (pointsFont) for (const [d, c] of [[1, '#000'], [0, '#fff']])
+        drawText(cx, pointsFont, u.text, px + d, py - 6 + d, { align: 0.5, colour: c, scale: 0.5 });
+      else for (const [d, c] of [[1, '#000'], [0, '#fff']]) { cx.fillStyle = c; cx.fillText(u.text, px + d, py + d); }
     }
     cx.globalAlpha = 1;
     cx.restore();
