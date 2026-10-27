@@ -79,6 +79,12 @@ const LAYER_PAD = 64;
 // x 455, glyph tops at y 20, about 12px of face. The face and its 1px step
 // are vertical gradients over `band` (glyph top to bottom on screen): pale to
 // full cyan, and magenta to red.
+// The kill combo, from the exe: each kill bumps the count (global +0x10b0) and
+// resets a 180-step timer (+0x51b0); when it runs out with two or more kills,
+// n*(n-1)*250 is added to the score (+0x16b0) and an "<n>xCOMBO" popup rises
+// 24px above the player. While it runs the HUD shows "<n>x" in fntCombo; the
+// exe draws it from a slide-in offset, so its screen spot here is a guess.
+const COMBO = { time: 180, bonus: n => n * (n - 1) * 250, popupDy: 24, font: 'fntCombo', x: 8, y: 6 };
 const SCORE_HUD = { font: 'fntPoints', x: 455, y: 18, scale: 1, band: [20, 32],
   face: ['#bfffff', '#2cffff'], shadow: ['#f0108a', '#fc0028'] };
 // The wash cycles between two screen-space gradients, purple `a` and teal `b`
@@ -530,9 +536,9 @@ export const WEAPON = { pickupScale: 3, throwSpeed: 12, friction: 0.25, spin: 3,
 // objSplat (create 0xb03090, step 0xb03640): a random sprSplat1-4, image
 // angle random(360), scale 0.8 + random(0.4), image speed 0.15; it slides
 // and slows, then stays on the floor. objBigBlood (0x4e2a40) leaves the pool
-// under a body. Counts, spread and speeds of a burst are guesses.
+// under a body. Count and spread are fitted to native death frames; speeds are guesses.
 export const BLOOD = { splats: ['sprSplat1', 'sprSplat2', 'sprSplat3', 'sprSplat4'], pool: ['sprBigBlood1', 'sprBigBlood2'],
-  scaleMin: 0.8, scaleRand: 0.4, imageSpeed: 0.15, count: 4, spread: 30, speedMin: 1, speedRand: 4, friction: 0.25 };
+  scaleMin: 0.8, scaleRand: 0.4, imageSpeed: 0.15, count: 30, spread: 90, speedMin: 1, speedRand: 4, friction: 0.25 };
 // Camera: the view leads toward the mouse (a guess at objCamera's step).
 export const CAMERA = { lead: 0.5, max: 22, ease: 0.15 };
 // During a talk the native view sits on whoever speaks: the view's top-left per
@@ -1218,6 +1224,16 @@ export async function play(env) {
     stats.score += pts;
     popups.push({ text: pts + 'PTS', x, y, t: POINTS.popup });
   };
+  const combo = { n: 0, t: 0 };
+  const killed = () => { stats.kills++; combo.n++; combo.t = COMBO.time; };
+  const stepCombo = () => {
+    if (combo.t <= 0 || --combo.t > 0) return;
+    if (combo.n > 1) {
+      stats.score += COMBO.bonus(combo.n);
+      popups.push({ text: combo.n + 'xCOMBO', x: p.x, y: p.y - COMBO.popupDy, t: POINTS.popup });
+    }
+    combo.n = 0;
+  };
   // With no player instance the player gets out of the level's car (objCar's
   // children, e.g. objFansVan), as in play footage: a step toward the room's
   // middle from it. With no car, where the mask or style menu sits (a guess).
@@ -1266,6 +1282,8 @@ export async function play(env) {
   const hint = (night || floor2) && G.text?.[NIGHT.hint.text] ? { font: await loadFont(G, NIGHT.hint.font), kills: stats.kills } : null;
   const restartFont = G.text?.[RESTART.text] ? await loadFont(G, RESTART.font) : null;
   const pointsFont = G.wad ? await loadFont(G, SCORE_HUD.font) : null;
+  const comboFont = G.wad ? await loadFont(G, COMBO.font).catch(() => null) : null;
+  const ammoFont = G.wad ? await loadFont(G, 'fntAmmo').catch(() => null) : null;
   const dateFonts = card ? { time: await loadFont(G, 'fntTime'), date: await loadFont(G, 'fntDate') } : {};
   const talkFonts = G.text ? { text: await loadFont(G, TALK.fontName), skip: await loadFont(G, TALK.skip.font) } : {};
   const onKey = (e) => {
@@ -1398,7 +1416,7 @@ export async function play(env) {
     if (e.couple) e = split(e);
     if (e.fat && --e.hp > 0) return;
     const k = enemies.includes(e) ? enemies : kos;
-    if (e.isEnemy) { stats.kills++; award(e.fat ? POINTS.fat : k === kos ? POINTS.downed : POINTS.kill, e.x, e.y); }
+    if (e.isEnemy) { killed(); award(e.fat ? POINTS.fat : k === kos ? POINTS.downed : POINTS.kill, e.x, e.y); }
     k.splice(k.indexOf(e), 1);
     dropGun(e);
     const s = sprite || (shotgun && e.spr.deadShotgun) || e.spr.deadShot;
@@ -1506,7 +1524,7 @@ export async function play(env) {
       p.x = k.x; p.y = k.y; p.hs = p.vs = 0;
       return true;
     }
-    if (k.isEnemy) { stats.kills++; award(POINTS.exec, k.x, k.y); }
+    if (k.isEnemy) { killed(); award(POINTS.exec, k.x, k.y); }
     const d = { x: k.x, y: k.y, angle: k.angle, sprite: body, frame: 0, imageSpeed: EXEC.imageSpeed * frames(body) / duration };
     dead.push(d);
     bleed(k.x, k.y, k.angle, true);
@@ -2099,7 +2117,7 @@ export async function play(env) {
   }
   function bossDies(b, sprite, speed, friction) {
     bosses.splice(bosses.indexOf(b), 1);
-    stats.kills++;
+    killed();
     dead.push({ x: b.x, y: b.y, angle: b.angle, sprite, frame: 0, imageSpeed: 0, dir: pointDir(p.x, p.y, b.x, b.y), speed, friction });
     cam.shake = Math.max(cam.shake, KO.shake);
   }
@@ -2180,6 +2198,7 @@ export async function play(env) {
       q.x += lenX(q.speed, q.dir); q.y += lenY(q.speed, q.dir);
       q.speed = Math.max(0, q.speed - BURST.friction);
     }
+    stepCombo();
     for (const u of [...popups]) if (--u.t <= 0) popups.splice(popups.indexOf(u), 1); else u.y -= 0.3;
     if (shownScore < stats.score) shownScore = Math.min(stats.score, shownScore + Math.max(10, Math.ceil((stats.score - shownScore) / 10)));
     pressed.clear();
@@ -2343,6 +2362,8 @@ export async function play(env) {
     if (pointsFont) for (const [d, c] of [[2, '#000'], [1, P.shadow], [0, P.face]])
       if (typeof c === 'string') drawText(cx, pointsFont, t, P.x + d, P.y + d, { align: 1, colour: c, scale: P.scale });
       else cx.drawImage(scoreArt(t, c, d), 0, 0);
+    if (comboFont && combo.n > 1 && combo.t > 0)
+      for (const [d, c] of [[2, '#000'], [0, '#fff']]) drawText(cx, comboFont, combo.n + 'x', COMBO.x + d, COMBO.y + d, { align: 0, colour: c });
   }
   // A gradient-filled score line, drawn once per text into a view-sized canvas.
   const scoreCache = new Map();
@@ -2437,9 +2458,10 @@ export async function play(env) {
     if (film) sprite(film.sprite, film.arrived ? 0 : film.frame, film.x, film.y, -270 * RAD);
     for (const b of bullets) sprite(bulletSprite, 0, b.x, b.y, -b.dir * RAD);
     if (held()?.gun) {
-      cx.font = 'bold 12px monospace';
-      cx.fillStyle = '#fff';
-      cx.fillText(`${held().label || p.weapon} ${p.ammo}`, 8 - sx, VIEW_H - 8 - sy);
+      // The ammo count in the wad's fntAmmo; its spot on screen is a guess.
+      const t = `${held().label || p.weapon} ${p.ammo}`;
+      if (ammoFont) for (const [d, c] of [[1, '#000'], [0, '#fff']]) drawText(cx, ammoFont, t, 8 - sx + d, VIEW_H - 24 - sy + d, { align: 0, colour: c });
+      else { cx.font = 'bold 12px monospace'; cx.fillStyle = '#fff'; cx.fillText(t, 8 - sx, VIEW_H - 8 - sy); }
     }
     if (p.dead) {
       sprite(p.dead.sprite, p.dead.frame, p.x, p.y, -p.dead.angle * RAD);
