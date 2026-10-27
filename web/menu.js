@@ -798,10 +798,10 @@ async function film(G, canvas, zoom, s) {
 // -700. sprMasksBig frames 0..3 follow the menu order (frame 4 is Ash's).
 // Locked masks are skipped in the exe; all four are open here.
 export const MASKS = [
-  { name: 'COREY', obj: 'objPlayerZebra', frame: 0, note: 'ROLL (SPACE)' },
-  { name: 'TONY', obj: 'objPlayerTiger', frame: 1, note: 'LETHAL FISTS, NO WEAPONS' },
-  { name: 'ALEX & ASH', obj: 'objPlayerSwanChainsaw', frame: 2, note: 'CHAINSAW' },
-  { name: 'MARK', obj: 'objPlayerBear', frame: 3, note: 'DUAL MP5S, RIGHT CLICK SPREADS' },
+  { name: 'COREY', obj: 'objPlayerZebra', frame: 0, note: [3056] },
+  { name: 'TONY', obj: 'objPlayerTiger', frame: 1, note: [3054, 3055] },
+  { name: 'ALEX & ASH', obj: 'objPlayerSwanChainsaw', frame: 2, note: [3057] },
+  { name: 'MARK', obj: 'objPlayerBear', frame: 3, note: [3058] },
 ];
 // objCobraMaskMenu (Jake, Hard News and Withdrawal): create 0x654060 names
 // the masks JAKE, IRVIN, DALLAS and their notes from string ids 3051, 3052
@@ -813,7 +813,7 @@ export const MASKS = [
 // passed on as '<player object>:<index>' (game.js FANS). Text comes from the
 // player's own localization at runtime.
 const PICKERS = {
-  objMaskMenu: { title: 'CHOOSE YOUR MASK', sprite: 'sprMasksBig', slot: 130, scale: [0.9, 0.55], list: () => MASKS },
+  objMaskMenu: { native: true, sprite: 'sprMasksBig', list: G => MASKS.map(m => ({ ...m, note: noteText(G, m.note) })) },
   objCobraMaskMenu: { title: 'CHOOSE YOUR MASK', sprite: 'sprCobraMasksBig', slot: 110, scale: [1.2, 0.7], list: G => [
     { name: 'JAKE', note: [3051] }, { name: 'IRVIN', note: [3052] }, { name: 'DALLAS', note: [3053, 3054] },
   ].map((m, i) => ({ ...m, obj: 'objPlayerCobra:' + i, frame: i, note: noteText(G, m.note) })) },
@@ -824,8 +824,9 @@ const PICKERS = {
 const noteText = (G, ids) => ids.map(id => G.text?.[id] || '').filter(Boolean).join(', ').toUpperCase();
 export const PICKER_OBJECTS = Object.keys(PICKERS);
 const lastPick = {};
-export async function maskMenu(G, canvas, zoom, kind = 'objMaskMenu') {
+export async function maskMenu(G, canvas, zoom, kind = 'objMaskMenu', backdrop = null) {
   const k = PICKERS[kind] || PICKERS.objMaskMenu, list = k.list(G);
+  if (k.native) return fansMenu(G, canvas, zoom, kind, list, backdrop);
   const cx = setup(canvas, zoom);
   const [big, small] = await Promise.all(['fntChapter', 'fntScoreSmall'].map(n => loadFont(G, n)));
   const sp = await sprites(G, [k.sprite, 'sprScanlines', 'sprNoise']);
@@ -864,6 +865,88 @@ export async function maskMenu(G, canvas, zoom, kind = 'objMaskMenu') {
     drawText(cx, small, m.note, W / 2, H - 28, { align: 0.5, colour: '#c8b8ff', scale: Math.min(0.8, (W - 20) / Math.max(1, textWidth(small, m.note))) });
     tile(cx, sp.sprScanlines, 0.2);
     tile(cx, sp.sprNoise, 0.05, (t * 37) % 160, (t * 53) % 160);
+  });
+}
+
+// The Fans' picker as the exe draws it over the level (measured on the
+// native 480x270 view, here 7px higher for the 256 rows): the room around
+// the car up top, a striped band across y 95..158 whose red rows fade out to
+// the right under a pulsing green line, a dark glow below cycling purple to
+// teal, the picked mask tilted and wobbling at (240,133) with the others to
+// its right, and the van's roof (sprFansVan, origin 70,30) at (240,211) as
+// the name plate: the name in fntMaskName, cyan over a magenta step, and the
+// note from the player's localization in magenta under it.
+const BAND = { top: 95, rows: 8, count: 8, red: [76, 76, 76, 89, 110, 131] };
+async function fansMenu(G, canvas, zoom, kind, list, backdrop) {
+  const cx = setup(canvas, zoom);
+  const font = await loadFont(G, 'fntMaskName');
+  const sp = await sprites(G, ['sprMasksBig', 'sprFansVan']);
+  let sel = lastPick[kind] || 0, slide = -700;
+  const n = list.length;
+  const mask = (m, x, y, angle, scale) => {
+    const s = sp.sprMasksBig;
+    if (!s) return;
+    const f = s.frames[m.frame % s.frames.length];
+    cx.save();
+    cx.translate(x, y);
+    cx.rotate(-angle * Math.PI / 180);
+    cx.scale(scale, scale);
+    cx.drawImage(s.img, f.x, f.y, f.w, f.h, -59, -65, f.w, f.h);
+    cx.restore();
+  };
+  return loop(canvas, (t, ev) => {
+    for (const e of ev) {
+      if (e.k === 'left' || e.k === 'up') sel = (sel + n - 1) % n;
+      if (e.k === 'right' || e.k === 'down') sel = (sel + 1) % n;
+      if ((e.k === 'ok' || e.k === 'click') && t > 10) { lastPick[kind] = sel; return list[sel].obj; }
+      if (e.k === 'back') return null;
+    }
+    slide = Math.min(0, slide + Math.max(4, -slide * 0.15));
+    const tt = t / 60;
+    cx.fillStyle = '#000';
+    cx.fillRect(0, 0, W, H);
+    backdrop?.(cx);
+    // The exe shows the room at about half its brightness.
+    cx.fillStyle = 'rgba(0,0,0,0.5)';
+    cx.fillRect(0, 0, W, BAND.top);
+    // The dark glow below the band.
+    const bottom = BAND.top + BAND.rows * BAND.count;
+    const hue = merge([100, 8, 108], [8, 128, 140], wave(0.6, tt));
+    const g = cx.createRadialGradient(W / 2, bottom + 40, 10, W / 2, bottom + 40, 300);
+    g.addColorStop(0, css(hue.map(v => v * 0.4)));
+    g.addColorStop(1, css(hue.map(v => v * 0.02)));
+    cx.fillStyle = g;
+    cx.fillRect(0, bottom, W, H - bottom);
+    // The band: two black rows, then the red ramp with the coloured line in it.
+    const line = css(merge([0, 30, 0], [0, 120, 0], wave(2, tt)));
+    for (let r = 0; r < BAND.count; r++) {
+      const y = BAND.top + r * BAND.rows;
+      cx.fillStyle = '#000';
+      cx.fillRect(0, y, W, BAND.rows);
+      BAND.red.forEach((red, i) => {
+        const fade = cx.createLinearGradient(0, 0, 300, 0);
+        fade.addColorStop(0, `rgb(${red},0,${Math.round(red * 0.3 * wave(0.6, tt))})`);
+        fade.addColorStop(1, 'rgba(0,0,0,0)');
+        cx.fillStyle = fade;
+        cx.fillRect(0, y + 2 + i, W, 1);
+      });
+      cx.globalCompositeOperation = 'lighter';
+      cx.fillStyle = line;
+      cx.fillRect(0, y + 3, W, 2);
+      cx.globalCompositeOperation = 'source-over';
+    }
+    // The masks: the next ones wait to the right of the picked one.
+    for (let d = Math.min(2, n - 1); d >= 1; d--)
+      mask(list[(sel + d) % n], 240 + d * 85 + slide, 133, 0, 1.1);
+    mask(list[sel], 240 + slide, 133 + Math.sin(tt * 3) * 2, -20 + Math.sin(tt * 2) * 4, 1.35);
+    // The van roof with the name and the note on it.
+    const van = sp.sprFansVan;
+    if (van) { const f = van.frames[0]; cx.drawImage(van.img, f.x, f.y, f.w, f.h, 240 - 70, 211 - 30, f.w, f.h); }
+    const m = list[sel];
+    const sc = Math.min(0.62, 110 / Math.max(1, textWidth(font, m.name)));
+    for (const [d, c] of [[2, '#ff1fd2'], [1, '#ff1fd2'], [0, '#29f8ff']])
+      drawText(cx, font, m.name, 240 - d, 196 + d, { align: 0.5, colour: c, scale: sc });
+    if (m.note) drawText(cx, font, m.note, 240, 224, { align: 0.5, colour: '#ff5cf4', scale: Math.min(0.48, 116 / Math.max(1, textWidth(font, m.note))) });
   });
 }
 

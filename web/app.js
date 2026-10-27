@@ -4,7 +4,7 @@
 import { Wad } from './agar.js';
 import * as T from './tables.js';
 import { INSTCC } from './instcc.js';
-import { play, musicFor, SOUND } from './game.js';
+import { play, musicFor, SOUND, pickerStart } from './game.js';
 import { Audio, RemoteFile } from './audio.js';
 import { scoreScreen } from './score.js';
 import { frontEnd, card, maskMenu, PICKER_OBJECTS, abortMenu, STORY, progress, records, options } from './menu.js';
@@ -221,7 +221,12 @@ async function startPlay(name = $('room').value, carry = null, track, character 
   if (request !== menuToken) return false;
   const picker = room.insts.map(i => G.objects.get(i.obj)?.name).find(n => PICKER_OBJECTS.includes(n));
   if (!character && picker) {
-    character = await maskMenu(G, $('canvas'), zoomNow(), picker);
+    // The level shows behind the picker, centred on where the player gets out.
+    const { menuAt, carAt } = pickerStart(G, room), at = carAt || menuAt;
+    const vx = Math.max(0, Math.min(room.w - 480, Math.round(at.x - 240)));
+    const vy = Math.max(0, Math.min(room.h - 256, Math.round(at.y - 128)));
+    const backdrop = cx => { cx.save(); cx.translate(-vx, -vy); drawRoomItems(cx, items, imgs); cx.restore(); };
+    character = await maskMenu(G, $('canvas'), zoomNow(), picker, backdrop);
     if (request !== menuToken || typeof character !== 'string') {
       if (character === null) status('No mask picked.');
       return false;

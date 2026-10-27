@@ -767,6 +767,15 @@ export function findPlayer(G, room) {
   return room.insts.find(i => inherits(G, G.objects.get(i.obj), 'objPlayer') && G.objects.get(i.obj).sprite >= 0);
 }
 
+// On a mask-picker room the player steps out of the car toward the room's
+// middle; the picker draws the level around that point behind it.
+export function pickerStart(G, room) {
+  const menuAt = room.insts.find(i => /^obj(Mask|CobraMask|SonStyle)Menu$/.test(G.objects.get(i.obj)?.name));
+  const car = menuAt && room.insts.find(i => inherits(G, G.objects.get(i.obj), 'objCar'));
+  const carAt = car && (d => ({ x: car.x + lenX(CAR_EXIT, d), y: car.y + lenY(CAR_EXIT, d) }))(pointDir(car.x, car.y, room.w / 2, room.h / 2));
+  return { menuAt, carAt };
+}
+
 // GameMaker angles: degrees, counter-clockwise, with y pointing down.
 const RAD = Math.PI / 180;
 const lenX = (l, d) => l * Math.cos(d * RAD), lenY = (l, d) => -l * Math.sin(d * RAD);
@@ -1195,9 +1204,7 @@ export async function play(env) {
   // With no player instance the player gets out of the level's car (objCar's
   // children, e.g. objFansVan), as in play footage: a step toward the room's
   // middle from it. With no car, where the mask or style menu sits (a guess).
-  const menuAt = room.insts.find(i => /^obj(Mask|CobraMask|SonStyle)Menu$/.test(G.objects.get(i.obj)?.name));
-  const car = menuAt && room.insts.find(i => inherits(G, G.objects.get(i.obj), 'objCar'));
-  const carAt = car && (d => ({ x: car.x + lenX(CAR_EXIT, d), y: car.y + lenY(CAR_EXIT, d) }))(pointDir(car.x, car.y, room.w / 2, room.h / 2));
+  const { menuAt, carAt } = pickerStart(G, room);
   const from = spawn || entry || bossEnter || carAt || menuAt;
   if (carry && entry && !spawn && !carry.elevator) { carry.x = entry.x; carry.y = entry.y; }
   const clear = (x, y) => carry || spawn || enemies.every(e => Math.hypot(e.x - x, e.y - y) > 64);
