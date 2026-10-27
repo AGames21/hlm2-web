@@ -76,9 +76,18 @@ export const FILM_SET = { obj: 'objDirector', walk: 'sprDirectorWalk', speed: 1,
 export const CAR_EXIT = 40;
 const LAYER_PAD = 64;
 // The score HUD as the native view shows it (480x270): right-aligned at
-// x 455, glyph tops at y 20, about 14px tall.
-const SCORE_HUD = { font: 'fntPoints', x: 455, y: 18, scale: 1, face: '#5ef6ff', shadow: '#ff1f8e' };
-export const WASH = { colour: 0xC0C0C0, a: [99, 7, 94], b: [21, 63, 78], period: 600, dark: 0.55 };
+// x 455, glyph tops at y 20, about 12px of face. The face and its 1px step
+// are vertical gradients over `band` (glyph top to bottom on screen): pale to
+// full cyan, and magenta to red.
+const SCORE_HUD = { font: 'fntPoints', x: 455, y: 18, scale: 1, band: [20, 32],
+  face: ['#bfffff', '#2cffff'], shadow: ['#f0108a', '#fc0028'] };
+// The wash cycles between two screen-space gradients, purple `a` and teal `b`
+// (top and bottom colours, fitted to the two ends in native Down Under
+// frames). A halo on the view centre brightens it by `halo.k` of the colour
+// there, and a small grey-white core is added on the player.
+export const WASH = { colour: 0xC0C0C0, period: 600,
+  a: [[129, 1, 113], [34, 1, 29]], b: [[2, 139, 136], [0, 50, 48]],
+  halo: { r: 260, k: 0.4 }, core: { r: 38, colour: [18, 16, 18] } };
 export const VICTIMS = {
   objVictim4: { walk: 'sprVictim4Walk', attack: 'sprVictim4Punch', legs: 'sprVictim4Legs' },
   objVictim6: { dead: 'sprVictim6Dead' },
@@ -2328,10 +2337,27 @@ export async function play(env) {
     }
     cx.globalAlpha = 1;
     cx.restore();
-    // The score in fntPoints: cyan over a magenta step and a black one.
-    const t = shownScore + 'PTS', P = SCORE_HUD;
+    // The score in fntPoints: the cyan face over a magenta step and a black one.
+    // Native shows the score's zeros with the tall 'O' glyph; the font's own '0' is short.
+    const t = String(shownScore).replace(/0/g, 'O') + 'PTS', P = SCORE_HUD;
     if (pointsFont) for (const [d, c] of [[2, '#000'], [1, P.shadow], [0, P.face]])
-      drawText(cx, pointsFont, t, P.x + d, P.y + d, { align: 1, colour: c, scale: P.scale });
+      if (typeof c === 'string') drawText(cx, pointsFont, t, P.x + d, P.y + d, { align: 1, colour: c, scale: P.scale });
+      else cx.drawImage(scoreArt(t, c, d), 0, 0);
+  }
+  // A gradient-filled score line, drawn once per text into a view-sized canvas.
+  const scoreCache = new Map();
+  function scoreArt(t, [top, bottom], d) {
+    const key = t + top + d;
+    let c = scoreCache.get(key);
+    if (c) return c;
+    if (scoreCache.size > 32) scoreCache.clear();
+    const P = SCORE_HUD, g = (c = new OffscreenCanvas(VIEW_W, VIEW_H)).getContext('2d');
+    drawText(g, pointsFont, t, P.x + d, P.y + d, { align: 1, colour: '#fff', scale: P.scale });
+    const grad = g.createLinearGradient(0, P.band[0] + d, 0, P.band[1] + d);
+    grad.addColorStop(0, top); grad.addColorStop(1, bottom);
+    g.globalCompositeOperation = 'source-in'; g.fillStyle = grad; g.fillRect(0, 0, VIEW_W, VIEW_H);
+    scoreCache.set(key, c);
+    return c;
   }
 
   // The couple room's fade: black over everything, then a red glow with the
@@ -2350,7 +2376,7 @@ export async function play(env) {
     }
     cx.restore();
   }
-  let frameClock = 0;
+  let frameClock = 0, wash = null;
   function draw() {
     frameClock++;
     const c = room.colour;
@@ -2363,12 +2389,24 @@ export async function play(env) {
       g.addColorStop(0, `rgb(${NIGHT.top})`); g.addColorStop(1, `rgb(${NIGHT.bottom})`);
       cx.fillStyle = g;
     } else if (c === WASH.colour) {
-      const k = (1 - Math.cos(frameClock * 2 * Math.PI / WASH.period)) / 2, mix = WASH.a.map((v, i) => Math.round(v + (WASH.b[i] - v) * k));
+      const k = (1 - Math.cos(frameClock * 2 * Math.PI / WASH.period)) / 2;
+      wash = [0, 1].map(e => WASH.a[e].map((v, i) => Math.round(v + (WASH.b[e][i] - v) * k)));
       const g = cx.createLinearGradient(0, 0, 0, VIEW_H);
-      g.addColorStop(0, `rgb(${mix})`); g.addColorStop(1, `rgb(${mix.map(v => Math.round(v * WASH.dark))})`);
+      g.addColorStop(0, `rgb(${wash[0]})`); g.addColorStop(1, `rgb(${wash[1]})`);
       cx.fillStyle = g;
     } else cx.fillStyle = `rgb(${c & 255},${(c >> 8) & 255},${(c >> 16) & 255})`;
     cx.fillRect(-4, -4, VIEW_W + 8, VIEW_H + 8);
+    if (c === WASH.colour && !night) {
+      const mid = wash[0].map((v, i) => Math.round((v + wash[1][i]) / 2 * WASH.halo.k));
+      const lights = [[VIEW_W / 2, VIEW_H / 2, WASH.halo.r, mid], [p.x - cam.x, p.y - cam.y, WASH.core.r, WASH.core.colour]];
+      cx.save(); cx.globalCompositeOperation = 'lighter';
+      for (const [x, y, r, colour] of lights) {
+        const g = cx.createRadialGradient(x, y, 0, x, y, r);
+        g.addColorStop(0, `rgb(${colour})`); g.addColorStop(1, 'rgb(0,0,0)');
+        cx.fillStyle = g; cx.fillRect(x - r, y - r, r * 2, r * 2);
+      }
+      cx.restore();
+    }
     blitLayer(under);
     blitLayer(gore);
     for (const q of splats) {
