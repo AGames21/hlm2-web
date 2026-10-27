@@ -74,6 +74,10 @@ export const FILM_SET = { obj: 'objDirector', walk: 'sprDirectorWalk', speed: 1,
 // object; the game shows a slow purple and teal wash there instead (footage).
 // How far from its car the player starts (a guess from footage).
 export const CAR_EXIT = 40;
+const LAYER_PAD = 64;
+// The score HUD as the native view shows it (480x270): right-aligned at
+// x 455, glyph tops at y 20, about 14px tall.
+const SCORE_HUD = { font: 'fntPoints', x: 455, y: 18, scale: 1, face: '#5ef6ff', shadow: '#ff1f8e' };
 export const WASH = { colour: 0xC0C0C0, a: [99, 7, 94], b: [21, 63, 78], period: 600, dark: 0.55 };
 export const VICTIMS = {
   objVictim4: { walk: 'sprVictim4Walk', attack: 'sprVictim4Punch', legs: 'sprVictim4Legs' },
@@ -1157,9 +1161,13 @@ export async function play(env) {
   // Pre-render the room into the layers under and over the player, leaving
   // out everything that moves.
   const dynamic = new Set([spawn, ...enemies.map(e => e.inst), ...doors.map(d => d.inst), ...weapons.map(w => w.inst), ...exits.map(x => x.inst), ...screens.map(s => s.inst), ...sliders.map(d => d.inst), ...elevators.map(l => l.inst), ...bosses.flatMap(b => [b.inst, b.actor].filter(Boolean)), film?.inst]);
+  // Art may hang past the room's edges (the Fans' van sits 11px below
+  // rmFansLevel1Floor1); the exe draws it there, so the layers keep a margin.
   const layer = (keep) => {
-    const c = new OffscreenCanvas(room.w, room.h), cx = c.getContext('2d');
+    const pad = LAYER_PAD, c = new OffscreenCanvas(room.w + 2 * pad, room.h + 2 * pad), cx = c.getContext('2d');
+    cx.translate(pad, pad);
     drawRoomItems(cx, items, imgs, keep, dynamic);
+    c.pad = pad;
     return c;
   };
   const under = layer(i => i.depth >= pobj.depth), over = layer(i => i.depth < pobj.depth);
@@ -1248,6 +1256,7 @@ export async function play(env) {
   const night = NIGHT.room.test(room.name), floor2 = FLOOR2_HINT.room.test(room.name);
   const hint = (night || floor2) && G.text?.[NIGHT.hint.text] ? { font: await loadFont(G, NIGHT.hint.font), kills: stats.kills } : null;
   const restartFont = G.text?.[RESTART.text] ? await loadFont(G, RESTART.font) : null;
+  const pointsFont = G.wad ? await loadFont(G, SCORE_HUD.font) : null;
   const dateFonts = card ? { time: await loadFont(G, 'fntTime'), date: await loadFont(G, 'fntDate') } : {};
   const talkFonts = G.text ? { text: await loadFont(G, TALK.fontName), skip: await loadFont(G, TALK.skip.font) } : {};
   const onKey = (e) => {
@@ -2239,9 +2248,10 @@ export async function play(env) {
   // A room-sized layer, drawn only where it overlaps the view (the camera can
   // sit past the room's edges).
   function blitLayer(img) {
-    const sx = Math.max(0, cam.x), sy = Math.max(0, cam.y);
-    const ex = Math.min(img.width, cam.x + VIEW_W), ey = Math.min(img.height, cam.y + VIEW_H);
-    if (ex > sx && ey > sy) cx.drawImage(img, sx, sy, ex - sx, ey - sy, sx - cam.x, sy - cam.y, ex - sx, ey - sy);
+    const pad = img.pad || 0, x0 = cam.x + pad, y0 = cam.y + pad;
+    const sx = Math.max(0, x0), sy = Math.max(0, y0);
+    const ex = Math.min(img.width, x0 + VIEW_W), ey = Math.min(img.height, y0 + VIEW_H);
+    if (ex > sx && ey > sy) cx.drawImage(img, sx, sy, ex - sx, ey - sy, sx - x0, sy - y0, ex - sx, ey - sy);
   }
   function hint2() {
     const h = FLOOR2_HINT, name = e => G.objects.get(e.obj)?.name, left = [...enemies, ...kos];
@@ -2314,12 +2324,11 @@ export async function play(env) {
       cx.fillStyle = '#fff'; cx.fillText(u.text, Math.round(u.x - cam.x), Math.round(u.y - cam.y));
     }
     cx.globalAlpha = 1;
-    cx.font = 'bold 14px monospace';
-    cx.textAlign = 'right';
-    const t = shownScore + 'pts';
-    cx.fillStyle = '#000'; cx.fillText(t, VIEW_W - 7, 19);
-    cx.fillStyle = '#ff2ad4'; cx.fillText(t, VIEW_W - 8, 18);
     cx.restore();
+    // The score in fntPoints: cyan over a magenta step and a black one.
+    const t = shownScore + 'PTS', P = SCORE_HUD;
+    if (pointsFont) for (const [d, c] of [[2, '#000'], [1, P.shadow], [0, P.face]])
+      drawText(cx, pointsFont, t, P.x + d, P.y + d, { align: 1, colour: c, scale: P.scale });
   }
 
   // The couple room's fade: black over everything, then a red glow with the

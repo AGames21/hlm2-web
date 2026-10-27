@@ -8,7 +8,7 @@ globalThis.removeEventListener = events.removeEventListener.bind(events);
 
 class Canvas extends EventTarget {
   constructor(width = 480, height = 270) { super(); this.width = width; this.height = height; this.style = {}; }
-  getContext() { return { drawImage() {} }; }
+  getContext() { return { drawImage() {}, translate() {} }; }
   getBoundingClientRect() { return { left: 0, top: 0, width: this.width, height: this.height }; }
 }
 globalThis.OffscreenCanvas = Canvas;
