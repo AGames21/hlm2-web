@@ -511,7 +511,7 @@ export const CLEARED = { sprite: 'sprFloorCleared', bottom: 44 };
 // 960x540, so 2 native px per view px); its draw code was not read. The frame
 // is not tinted: a few strips slide sideways, the top 3 rows go black and a
 // white static band (solid, then sprStatic) crosses the lower middle. Top left
-// sits two bars and PAUSE in fntVHSMenu stretched 1.6 by 1.22 (the word is in neither the
+// sits two bars and PAUSE in fntVHSMenu stretched 1.64 by 1.12 (the word is in neither the
 // wad texts nor the exe strings). sprMenu frame 0 holds the menu: its title
 // and items are wad texts 3001 and 2995-3000, the music and effects rows show
 // an icon and 10 volume bars, and REWIND is greyed. Items have a 1px shadow.
@@ -521,7 +521,7 @@ export const PAUSE = {
     { vol: 'musicVolume', icon: 'music' }, { vol: 'effectsVolume', icon: 'speaker' }, { text: 3000, act: 'eject' }],
   x: 311, y: [99, 115, 131, 147, 163, 179], rowH: 16,
   colour: { on: '#ebebfe', off: '#7e7e82', dim: '#3b3b44', shadow: '#1e1e2b' },
-  label: { text: 'PAUSE', x: 56, y: 22, scale: [1.6, 1.22], colour: '#f6ffed', bars: [[37, 26, 6, 12], [46, 26, 6, 12]] },
+  label: { text: 'PAUSE', x: 54, y: 23, scale: [1.64, 1.12], colour: '#f6ffed', bars: [[37, 26, 6, 12], [46, 26, 6, 12]] },
   bar: { x: 323, step: 6, w: 4, h: 9, dy: 2, n: 10 },
   // Icons as 13x13 bitmaps from the screenshot, drawn at the row's top left.
   icons: {
