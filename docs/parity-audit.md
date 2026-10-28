@@ -1,5 +1,27 @@
 # Original-game comparison: 2026-10-23
 
+## 2026-10-28: requested easier-mode tuning
+
+- The owner requested a more forgiving game. Only the existing optional
+  easier-enemies tuning changed; normal mode retains its previous constants.
+- Easier-mode first-shot delay increased from 30 to 42 simulation steps
+  (0.5 to 0.7 seconds at 60 steps/s); aim turn rate decreased from 7 to 6.
+  Firing cooldown multiplier increased from 1.25 to 1.5, direct chase speed
+  decreased from 85% to 75%, and melee cooldown increased from 1.5x to 1.8x.
+- Behavioral tests compare actual gunner fire timing and melee displacement
+  between both modes. These tuning values are accessibility choices, not
+  native-game measurements or proof of a balanced full-story playthrough.
+  Special bosses, unarmed weapon-fetch movement and path-following have
+  separate logic; no uniform slowdown of every enemy is claimed.
+- Measured synthetic encounter: first bullet at step 16 in normal mode and
+  step 43 in easier mode; ten-step melee chase traveled 25 versus 18.75 px.
+  Final local verification passed 49/49 unit tests and 30/30 browser checks.
+- The option remains enabled by default and preserves saved user choices.
+  Use Options > Easier enemies to enable it if previously disabled.
+- No native session was needed; Steam and native save files were untouched.
+  No game files or new game text were added. Full native parity is still
+  incomplete; the pause-animation and Floor 2 comparison work remains open.
+
 ## 2026-10-28: pause-label comparison chunk
 
 - Read the full private handoff before editing; checkout started clean at a9d7807.

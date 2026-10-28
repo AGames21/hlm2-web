@@ -270,9 +270,10 @@ export const ENEMY = { wanderMin: 60, wanderRand: 60, wanderAnim: 0.1, ahead: 3,
   unarmed: { run: 2.5, image: 0.2, take: 22, slow: 2, near: 64, creep: 1 },
   guns: ['M16', 'Shotgun', 'DoubleBarrel', 'Kalashnikov'] };
 // The "Easier enemies" option (on by default, not in the original): gunmen wait
-// twice as long before the first shot, turn their aim slower and fire 25% less often.
-// Port option, not in the game: melee ones also run a bit slower and wait before their first swing.
-export const EASY = { firstShot: 30, turn: 7, cooldown: 1.25, chase: 0.85, swingCool: 1.5 };
+// 42 steps before the first shot, turn slower and use 1.5x firing cooldowns.
+// Chasers move at 75% speed and melee swings have 1.8x cooldowns.
+// These are accessibility choices, not measurements of native behavior.
+export const EASY = { firstShot: 42, turn: 6, cooldown: 1.5, chase: 0.75, swingCool: 1.8 };
 const firstShot = () => options.easier ? EASY.firstShot : ENEMY.recheck;
 // Create-time weapon swaps: object -> [held weapon that is swapped (null:
 // always), choices].
