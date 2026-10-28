@@ -512,17 +512,16 @@ export const CLEARED = { sprite: 'sprFloorCleared', bottom: 44 };
 // 960x540, so 2 native px per view px); its draw code was not read. The frame
 // is not tinted: a few strips slide sideways, the top 3 rows go black and a
 // white static band (solid, then sprStatic) crosses the lower middle. Top left
-// sits two bars and PAUSE in fntVHSMenu stretched 1.64 by 1.12 (the word is in neither the
-// wad texts nor the exe strings). sprMenu frame 0 holds the menu: its title
-// and items are wad texts 3001 and 2995-3000, the music and effects rows show
-// an icon and 10 volume bars, and REWIND is greyed. Items have a 1px shadow.
+// Native symbol: frame 4 of sprVCRSymbol at [34,24], scale [1.5,0.75].
+// Draw call 0x9e9507 was observed through Frida on 2026-10-28.
+// Menu labels remain WAD text ids; no pause-label string is embedded here.
 export const PAUSE = {
   font: 'fntVHSMenu', box: { sprite: 'sprMenu', x: 305, y: 72, w: 96 }, title: { text: 3001, y: 78 },
   items: [{ text: 2995, act: 'play' }, { text: 2996, off: true }, { text: 2997, act: 'config' },
     { vol: 'musicVolume', icon: 'music' }, { vol: 'effectsVolume', icon: 'speaker' }, { text: 3000, act: 'eject' }],
   x: 311, y: [99, 115, 131, 147, 163, 179], rowH: 16,
   colour: { on: '#ebebfe', off: '#7e7e82', dim: '#3b3b44', shadow: '#1e1e2b' },
-  label: { text: 'PAUSE', x: 54, y: 23, scale: [1.64, 1.12], colour: '#f6ffed', bars: [[37, 26, 6, 12], [46, 26, 6, 12]] },
+  label: { sprite: 'sprVCRSymbol', frame: 4, x: 34, y: 24, scale: [1.5, 0.75] },
   bar: { x: 323, step: 6, w: 4, h: 9, dy: 2, n: 10 },
   // Icons as 13x13 bitmaps from the screenshot, drawn at the row's top left.
   icons: {
@@ -913,7 +912,7 @@ export async function play(env) {
   if (fan?.disarm) P.disarm = Object.fromEntries(Object.keys(GUNS).map(g => [g, need(pre + 'Disarm' + g)]));
   P.deadShot = need(pre + 'DeadShot') || need(pre + 'DeadShotgun') || need(pre + 'DeadMachinegun');
   P.deadBlunt = need(pre + 'DeadBlunt') || P.deadShot;
-  const pauseArt = { box: art.get(need(PAUSE.box.sprite)), noise: art.get(need(PAUSE.vhs.noise.sprite)) };
+  const pauseArt = { box: art.get(need(PAUSE.box.sprite)), noise: art.get(need(PAUSE.vhs.noise.sprite)), label: art.get(need(PAUSE.label.sprite)) };
   const bulletSprite = need('sprBullet'), clearedArt = art.get(need(CLEARED.sprite)), leaveSprite = Object.fromEntries(Object.entries(IDLE.leave).map(([k, v]) => [k, need(v.sprite)]));
   const box = maskBox(G, pobj);
   const walls = buildSolids(G, room), sol = buildSolids(G, room, BODY.objects, SLIDING.objects, BODY);
@@ -2586,8 +2585,13 @@ export async function play(env) {
       cx.globalCompositeOperation = 'source-over';
     }
     const L = P.label;
-    cx.fillStyle = L.colour; for (const [x, y, w, h] of L.bars) cx.fillRect(x, y, w, h);
-    if (pauseFont) { cx.save(); cx.translate(L.x, L.y); cx.scale(...L.scale); drawText(cx, pauseFont, L.text, 0, 0, { colour: L.colour }); cx.restore(); }
+    const label = pauseArt.label, labelImg = label && imgs.get(label.hit.atlas);
+    if (labelImg) {
+      const f = label.hit.frames[L.frame];
+      if (f) cx.drawImage(labelImg, f.x, f.y, f.w, f.h,
+        L.x - label.s.ox * L.scale[0], L.y - label.s.oy * L.scale[1],
+        f.w * L.scale[0], f.h * L.scale[1]);
+    }
     const box = pauseArt.box, boxImg = box && imgs.get(box.hit.atlas);
     if (boxImg) { const f = box.hit.frames[0]; cx.drawImage(boxImg, f.x, f.y, f.w, f.h, P.box.x, P.box.y, f.w, f.h); }
     else { cx.fillStyle = '#0000f0'; cx.fillRect(P.box.x, P.box.y, P.box.w, 128); }

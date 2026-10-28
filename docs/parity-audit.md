@@ -1,5 +1,41 @@
 # Original-game comparison: 2026-10-23
 
+## 2026-10-28: native pause-symbol renderer recovered
+
+- Started clean at c7736f3. Read the private handoff and current audit.
+  Existing Ghidra project was opened with -noanalysis -readOnly; no Steam
+  file was written. REA's connected Windows Ghidra provider advertises x64
+  admission only; this game is x86, so existing local analysis was reused.
+- Object 1073's handlers lead through 0x9e83a0 and 0x9e9fb0 to common VHS
+  effect helper 0xe58360. Private decompilations and runtime records are in
+  ignored re/parity-pause-20261028/.
+- Frida observed 120 symbol draw calls in one second: sprVCRSymbol (1546)
+  and sprVCRSymbol2 (1548), frame 4, position [34,24], scale [1.5,0.75].
+  Caller sites were 0x9e9507 and 0x9e8edd. These are actual native draw
+  parameters, superseding the earlier font-and-bars reconstruction.
+- Browser now draws the WAD's sprVCRSymbol frame directly and removes the
+  embedded label string/font reconstruction. No original artwork or game
+  text was added to tracked files. The tinted flickering secondary symbol
+  layer remains unported; using the original base sprite alone is partial.
+- Twelve new native frames were sampled at requested 0.1-second intervals.
+  These remain wall-clock samples rather than frame-locked replay. A later
+  250-call trace observed sprMediumBlackDistortion, sprSmallBlackDistortion
+  and sprSmallWhiteDistortion; sprStatic was absent from both inspected
+  helper code and those traced sprite calls. The bounded trace is not proof
+  about every native draw path. The browser's static animation still differs.
+- Native ran offscreen through Frida and the browser ran headless. Both
+  native save files were restored byte for byte to session backups and the
+  handoff pristine originals. No real mouse or keyboard input was used.
+- Private-WAD browser rendering exercised the replacement with no page
+  exceptions. This is a symbol-rendering check, not a matched gameplay run.
+  The isolated WAD symbol occupies x=37..125, y=26..36 at 480x270,
+  including the two bars. Final local checks: 49/49 unit tests and 30/30
+  integrated browser checks passed. Native colour/secondary-layer flicker
+  and exact filtering still require comparison; a matching bounding box
+  alone does not prove identical pixels.
+  Next: recover common VHS particle/surface transforms and secondary-symbol
+  tint/timing, then compare Floor 2; full-game parity remains incomplete.
+
 ## 2026-10-28: requested easier-mode tuning
 
 - The owner requested a more forgiving game. Only the existing optional
