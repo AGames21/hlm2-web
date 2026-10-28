@@ -90,8 +90,10 @@ const SCORE_HUD = { font: 'fntPoints', x: 455, y: 18, scale: 1, band: [20, 32],
 // The wash cycles between two screen-space gradients, purple `a` and teal `b`
 // (top and bottom colours, fitted to the two ends in native Down Under
 // frames). A halo on the view centre brightens it by `halo.k` of the colour
-// there, and a small grey-white core is added on the player.
-export const WASH = { colour: 0xC0C0C0, period: 600,
+// there, and a small grey-white core is added on the player. Timed on native
+// Down Under (2026-10-27): purple to teal and back in 360 steps, and every
+// other teal end is dimmer (by `dim`), so the full pattern repeats in 720.
+export const WASH = { colour: 0xC0C0C0, period: 360, dim: 0.27,
   a: [[129, 1, 113], [34, 1, 29]], b: [[2, 139, 136], [0, 50, 48]],
   halo: { r: 260, k: 0.4 }, core: { r: 38, colour: [18, 16, 18] } };
 export const VICTIMS = {
@@ -505,6 +507,30 @@ export const SCREENS = { sound: 'sndBottleBreak', imageSpeed: 0.25, objects: {
 // (frame 0 FLOOR CLEARED, 1 AREA CLEARED) once the floor is clear; its slide
 // in is not read, so it sits centred 44px above the bottom of the view.
 export const CLEARED = { sprite: 'sprFloorCleared', bottom: 44 };
+// The in-game pause (Escape), measured off native Down Under (2026-10-27,
+// 960x540, so 2 native px per view px); its draw code was not read. The frame
+// is not tinted: a few strips slide sideways, the top 3 rows go black and a
+// white static band (solid, then sprStatic) crosses the lower middle. Top left
+// sits two bars and PAUSE in fntVHSMenu stretched 1.6 by 1.22 (the word is in neither the
+// wad texts nor the exe strings). sprMenu frame 0 holds the menu: its title
+// and items are wad texts 3001 and 2995-3000, the music and effects rows show
+// an icon and 10 volume bars, and REWIND is greyed. Items have a 1px shadow.
+export const PAUSE = {
+  font: 'fntVHSMenu', box: { sprite: 'sprMenu', x: 305, y: 72, w: 96 }, title: { text: 3001, y: 78 },
+  items: [{ text: 2995, act: 'play' }, { text: 2996, off: true }, { text: 2997, act: 'config' },
+    { vol: 'musicVolume', icon: 'music' }, { vol: 'effectsVolume', icon: 'speaker' }, { text: 3000, act: 'eject' }],
+  x: 311, y: [99, 115, 131, 147, 163, 179], rowH: 16,
+  colour: { on: '#ebebfe', off: '#7e7e82', dim: '#3b3b44', shadow: '#1e1e2b' },
+  label: { text: 'PAUSE', x: 56, y: 22, scale: [1.6, 1.22], colour: '#f6ffed', bars: [[37, 26, 6, 12], [46, 26, 6, 12]] },
+  bar: { x: 323, step: 6, w: 4, h: 9, dy: 2, n: 10 },
+  // Icons as 13x13 bitmaps from the screenshot, drawn at the row's top left.
+  icons: {
+    music: ['', '', '    #######', '    #######', '    #     #', '    #     #', '    #     #', '    #     #', '  ###   ###', ' ####  ####', '  ##    ##'],
+    speaker: ['', '', '     #', '    ## ##', '   ###   #', ' ##### #  #', ' #####  # #', ' #####  # #', ' ##### #  #', '   ###   #', '    ## ##', '     #'],
+  },
+  vhs: { black: 3, bands: [[5, 10, 10], [82, 16, -6], [127, 12, 8]], white: [162, 36], noise: { sprite: 'sprStatic', y: 198, h: 32, speed: 4 } },
+  sound: { open: 'sndPause', close: 'sndUnPause' },
+};
 // objElevator (810, Mall and NewsPaper floors; room start 0x7698e0, step
 // 0x76a430, room end 0x76a2e0). Drawn as sprElevatorDown, frame 0 shut and
 // 14 open; whether the player is inside is tested with the sprElevatorFloor
@@ -886,6 +912,7 @@ export async function play(env) {
   if (fan?.disarm) P.disarm = Object.fromEntries(Object.keys(GUNS).map(g => [g, need(pre + 'Disarm' + g)]));
   P.deadShot = need(pre + 'DeadShot') || need(pre + 'DeadShotgun') || need(pre + 'DeadMachinegun');
   P.deadBlunt = need(pre + 'DeadBlunt') || P.deadShot;
+  const pauseArt = { box: art.get(need(PAUSE.box.sprite)), noise: art.get(need(PAUSE.vhs.noise.sprite)) };
   const bulletSprite = need('sprBullet'), clearedArt = art.get(need(CLEARED.sprite)), leaveSprite = Object.fromEntries(Object.entries(IDLE.leave).map(([k, v]) => [k, need(v.sprite)]));
   const box = maskBox(G, pobj);
   const walls = buildSolids(G, room), sol = buildSolids(G, room, BODY.objects, SLIDING.objects, BODY);
@@ -1220,6 +1247,8 @@ export async function play(env) {
   // The HUD's score counts up toward the real one; popups are the "Npts" texts.
   let shownScore = stats.score;
   const popups = [], pieces = [];
+  // Counts 60 Hz game steps (not drawn frames), so timed effects keep native speed.
+  let frameClock = 0;
   const award = (pts, x, y) => {
     stats.score += pts;
     popups.push({ text: pts + 'PTS', x, y, t: POINTS.popup });
@@ -1284,11 +1313,53 @@ export async function play(env) {
   const pointsFont = G.wad ? await loadFont(G, SCORE_HUD.font) : null;
   const comboFont = G.wad ? await loadFont(G, COMBO.font).catch(() => null) : null;
   const ammoFont = G.wad ? await loadFont(G, 'fntAmmo').catch(() => null) : null;
+  const pauseFont = G.text?.[PAUSE.title.text] ? await loadFont(G, PAUSE.font).catch(() => null) : null;
+  // The pause menu (see PAUSE): null while playing, else the picked row.
+  let pause = null;
+  const pauseRow = y => PAUSE.y.findIndex(t => y >= t - 2 && y < t + PAUSE.rowH - 2);
+  function setPause(on) {
+    if (!!pause === on) return;
+    pause = on ? { sel: 0, t: 0 } : null;
+    keys.clear(); pressed.clear(); mouse.click = mouse.right = false;
+    sfx(on ? PAUSE.sound.open : PAUSE.sound.close);
+  }
+  function pauseAct(i) {
+    const it = PAUSE.items[i];
+    if (!it || it.off || it.vol) return;
+    if (it.act === 'play') setPause(false);
+    else if (it.act === 'config') env.config?.();
+    else if (it.act === 'eject') { pause = null; env.eject?.(); }
+  }
+  function pauseVolume(i, v) {
+    options[PAUSE.items[i].vol] = Math.max(0, Math.min(100, v));
+    options.save?.();
+    globalThis.dispatchEvent?.(new Event('settingschange'));
+  }
+  function pauseKey(e) {
+    const k = e.key === 'Enter' ? 'enter' : gameKey(e.key), it = PAUSE.items[pause.sel];
+    if (k === 'w' || k === 's') {
+      const d = k === 'w' ? -1 : 1, n = PAUSE.items.length;
+      do pause.sel = (pause.sel + d + n) % n; while (PAUSE.items[pause.sel].off);
+    } else if ((k === 'a' || k === 'd') && it.vol) pauseVolume(pause.sel, options[it.vol] + (k === 'a' ? -10 : 10));
+    else if (k === 'enter' || k === ' ' || k === 'f') pauseAct(pause.sel);
+    else return;
+    e.preventDefault();
+  }
+  function pauseMouse(e) {
+    const B = PAUSE.box, i = mouse.x >= B.x && mouse.x < B.x + B.w ? pauseRow(mouse.y) : -1;
+    if (i < 0 || PAUSE.items[i].off) return;
+    pause.sel = i;
+    if (e.type !== 'mousedown' || e.button !== 0) return;
+    if (PAUSE.items[i].vol) pauseVolume(i, Math.ceil((mouse.x - PAUSE.bar.x + 1) / PAUSE.bar.step) * 100 / PAUSE.bar.n);
+    else pauseAct(i);
+  }
   const dateFonts = card ? { time: await loadFont(G, 'fntTime'), date: await loadFont(G, 'fntDate') } : {};
   const talkFonts = G.text ? { text: await loadFont(G, TALK.fontName), skip: await loadFont(G, TALK.skip.font) } : {};
   const onKey = (e) => {
     if (env.paused?.()) return;
     if (e.type === 'keydown' && (e.target.closest?.('input, select, textarea, button') || e.target.isContentEditable)) return;
+    if (e.key === 'Escape' && e.type === 'keydown' && env.eject) { e.preventDefault(); setPause(!pause); return; }
+    if (pause) { if (e.type === 'keydown') pauseKey(e); return; }
     // Enter advances a talk box as in native; it is not rebindable.
     const k = e.key === 'Enter' ? 'enter' : gameKey(e.key);
     if (!['enter', 'w', 'a', 's', 'd', ' ', 'r', 'f', 'e', 'q', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) return;
@@ -1302,6 +1373,7 @@ export async function play(env) {
     const r = canvas.getBoundingClientRect();
     mouse.x = (e.clientX - r.left) * VIEW_W / r.width;
     mouse.y = (e.clientY - r.top) * VIEW_H / r.height;
+    if (pause) { pauseMouse(e); return; }
     // Ctrl+click is a Mac trackpad's right click.
     if (e.type === 'mousedown' && e.button === 0 && !e.ctrlKey) mouse.click = true;
     if (e.type === 'mousedown' && (e.button === 2 || (e.button === 0 && e.ctrlKey))) mouse.right = mouse.rightHeld = true;
@@ -1309,7 +1381,7 @@ export async function play(env) {
   };
   let wheelAt = -Infinity;
   const onWheel = (e) => {
-    if (env.paused?.()) return;
+    if (env.paused?.() || pause) return;
     e.preventDefault();
     if (e.timeStamp - wheelAt > LOCK_INPUT.wheelGap) pressed.add('q');
     wheelAt = e.timeStamp;
@@ -2160,7 +2232,9 @@ export async function play(env) {
   }
 
   function step() {
-    if (env.paused?.()) { keys.clear(); pressed.clear(); mouse.click = mouse.right = false; return; }
+    if (pause) pause.t++;
+    if (env.paused?.() || pause) { keys.clear(); pressed.clear(); mouse.click = mouse.right = false; return; }
+    frameClock++;
     // Keyboard stand-ins for the mouse buttons (see defaultBindings).
     if (pressed.has('f')) mouse.click = true;
     if (pressed.has('e')) mouse.right = true;
@@ -2397,9 +2471,8 @@ export async function play(env) {
     }
     cx.restore();
   }
-  let frameClock = 0, wash = null;
+  let wash = null;
   function draw() {
-    frameClock++;
     const c = room.colour;
     const shake = options.shake ? cam.shake : 0;
     const sx = Math.round((Math.random() * 2 - 1) * shake), sy = Math.round((Math.random() * 2 - 1) * shake);
@@ -2411,7 +2484,8 @@ export async function play(env) {
       cx.fillStyle = g;
     } else if (c === WASH.colour) {
       const k = (1 - Math.cos(frameClock * 2 * Math.PI / WASH.period)) / 2;
-      wash = [0, 1].map(e => WASH.a[e].map((v, i) => Math.round(v + (WASH.b[e][i] - v) * k)));
+      const dim = 1 - WASH.dim * (1 - Math.cos((frameClock - WASH.period / 2) * Math.PI / WASH.period)) / 2;
+      wash = [0, 1].map(e => WASH.a[e].map((v, i) => Math.round(v + (WASH.b[e][i] * dim - v) * k)));
       const g = cx.createLinearGradient(0, 0, 0, VIEW_H);
       g.addColorStop(0, `rgb(${wash[0]})`); g.addColorStop(1, `rgb(${wash[1]})`);
       cx.fillStyle = g;
@@ -2495,6 +2569,48 @@ export async function play(env) {
     }
   }
 
+  function drawPause() {
+    const P = PAUSE, V = P.vhs, C = P.colour;
+    cx.save();
+    for (const [y, h, dx] of V.bands) cx.drawImage(canvas, 0, y, VIEW_W, h, dx, y, VIEW_W, h);
+    cx.fillStyle = '#000'; cx.fillRect(0, 0, VIEW_W, V.black);
+    cx.fillStyle = '#fff'; cx.fillRect(0, V.white[0], VIEW_W, V.white[1]);
+    const nz = pauseArt.noise, img = nz && imgs.get(nz.hit.atlas);
+    if (img) {
+      // Two offset layers of static, screened, leave the band mostly white.
+      cx.globalCompositeOperation = 'screen';
+      const fs = nz.hit.frames, f = fs[Math.floor(pause.t / V.noise.speed) % fs.length], end = V.noise.y + V.noise.h;
+      for (const off of [0, Math.floor(f.w / 2)]) for (let x = -off; x < VIEW_W; x += f.w)
+        for (let y = V.noise.y; y < end; y += f.h) { const h = Math.min(f.h, end - y); cx.drawImage(img, f.x, f.y, f.w, h, x, y, f.w, h); }
+      cx.globalCompositeOperation = 'source-over';
+    }
+    const L = P.label;
+    cx.fillStyle = L.colour; for (const [x, y, w, h] of L.bars) cx.fillRect(x, y, w, h);
+    if (pauseFont) { cx.save(); cx.translate(L.x, L.y); cx.scale(...L.scale); drawText(cx, pauseFont, L.text, 0, 0, { colour: L.colour }); cx.restore(); }
+    const box = pauseArt.box, boxImg = box && imgs.get(box.hit.atlas);
+    if (boxImg) { const f = box.hit.frames[0]; cx.drawImage(boxImg, f.x, f.y, f.w, f.h, P.box.x, P.box.y, f.w, f.h); }
+    else { cx.fillStyle = '#0000f0'; cx.fillRect(P.box.x, P.box.y, P.box.w, 128); }
+    const shadowed = (fn, colour) => { fn(1, C.shadow); fn(0, colour); };
+    if (pauseFont) {
+      const t = String(G.text[P.title.text]), x = P.box.x + Math.round((P.box.w - textWidth(pauseFont, t)) / 2);
+      shadowed((d, c) => drawText(cx, pauseFont, t, x + d, P.title.y + d, { colour: c }), C.on);
+    }
+    P.items.forEach((it, i) => {
+      const colour = it.off ? C.dim : i === pause.sel ? C.on : C.off, y = P.y[i];
+      if (it.text != null) {
+        if (pauseFont && G.text[it.text]) shadowed((d, c) => drawText(cx, pauseFont, String(G.text[it.text]), P.x + d, y + d, { colour: c }), colour);
+        return;
+      }
+      shadowed((d, c) => {
+        cx.fillStyle = c;
+        P.icons[it.icon].forEach((row, r) => { for (let x = 0; x < row.length; x++) if (row[x] === '#') cx.fillRect(P.x - 1 + x + d, y + r + d, 1, 1); });
+        const B = P.bar, on = Math.round(options[it.vol] * B.n / 100);
+        for (let b = 0; b < on; b++) cx.fillRect(B.x + b * B.step + d, y + B.dy + d, B.w, B.h);
+      }, colour);
+    });
+    cx.restore();
+  }
+
   // requestAnimationFrame can stall in a hidden or embedded page, so a timer
   // runs the frame when it is late; whichever fires first wins.
   let last = performance.now(), acc = 0, running = true, tick = 0;
@@ -2510,18 +2626,19 @@ export async function play(env) {
     while (running && acc >= STEP_MS) { step(); acc -= STEP_MS; }
     if (!running) return;
     draw();
+    if (pause) drawPause();
     next();
   };
   moveCamera(1);
   if (env.autostart !== false) next();
   canvas.focus?.({ preventScroll: true });
   const keyLabel = name => options.bindings[name] === ' ' ? 'Space' : options.bindings[name].toUpperCase();
-  env.status(`Playing ${room.name} as ${pobj.name}: use your movement keys or arrows, mouse to aim, left click (or ${keyLabel('attack')}) to attack, right click (or ${keyLabel('grab')}) to pick up or throw, ${keyLabel('lock')} to lock on. Change keys in Settings. Esc or Stop to leave.`);
+  env.status(`Playing ${room.name} as ${pobj.name}: use your movement keys or arrows, mouse to aim, left click (or ${keyLabel('attack')}) to attack, right click (or ${keyLabel('grab')}) to pick up or throw, ${keyLabel('lock')} to lock on. Change keys in Settings. Esc pauses; Stop leaves.`);
 
   // Handle for tests and for stopping.
   const handle = {
     room: room.name, stats, cam, splats, gore, player: p, keys, pressed, mouse, solids: sol, box, enemies, bosses, kos, dead, doors, weapons, bullets, exits, elevators, talks, talkers, step, draw, leave,
-    left: false, talking: () => !!env.cutscene && !env.cutscene.done,
+    left: false, get paused() { return !!pause; }, pause: on => setPause(on ?? !pause), talking: () => !!env.cutscene && !env.cutscene.done,
     get lock() { return lock; },
     get hint() { return hint?.id; },
     diagnostics() {

@@ -239,6 +239,8 @@ async function startPlay(name = $('room').value, carry = null, track, character 
     status: message => { if (request === menuToken) status(message); },
     cancelled: () => request !== menuToken,
     paused: () => $('settings-dialog').open,
+    // The pause menu's CONFIG and EJECT.
+    config: () => openSettings(), eject: () => request === menuToken && (story ? showMenu() : showSelected()),
     restart: () => startPlay(room.name, carry, track, character), next: nextFloor,
     exitDone: inst => { const link = HUB.levels.includes(levelOf(room.name)) && hubLink(room, inst); return !!link && done(link.room, carry); },
     // The story's intro room hands over to the level once its talk is over.
@@ -663,7 +665,8 @@ $('play').onclick = () => G && (story = null, game ? (G.audio.playMusic(null), s
 addEventListener('keydown', e => {
   if ($('settings-dialog').open) return;
   if (e.target.closest?.('input, select, textarea, button') || e.target.isContentEditable) return;
-  if (e.key === 'Escape' && game) story ? showMenu() : showSelected();
+  // A game with a pause menu handles Escape itself.
+  if (e.key === 'Escape' && game && !('paused' in game)) story ? showMenu() : showSelected();
 });
 $('menu').onclick = () => G && showMenu();
 $('filter').oninput = () => G && fillRooms();
