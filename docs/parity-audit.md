@@ -43,6 +43,15 @@
 - Arrival spot differs: native put the player at (302,30) on Floor 2 after
   leaving Floor 1 at (328,30); web keeps (328,30). Back on Floor 1 native kept
   (348,30). Rule not yet read.
+- Arrival spot read and ported: touching a live objNextroom, native takes
+  the controls and walks the player left 2 px a frame for about 13 frames,
+  then changes room keeping that spot (Frida samples: exits at x 328, 316
+  and 340 all walked 26 px left, even after moving right first; Floor 2
+  arrival was the walked-to spot, 302 and 290). Web now does the same
+  (EXIT_WALK). Web still lands at (308,24), not (302,30): its arrival pushes
+  the player clear of the stairwell wall at x 288, which native lets the
+  player overlap. Kept so the player cannot start stuck in a wall. What sets
+  the walk direction for other exits is not read.
 - Walk back: native's Floor 2 exit goes back to Floor 1 (room 11). Web goes
   straight on to the next level room. Floor 1 holds objFansVan and objHBorder,
   so the level presumably ends at the van after walking back down. Codex is

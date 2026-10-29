@@ -481,6 +481,13 @@ export const DOG = { recheck: 10, speed: 4, kill: 22, imageSpeed: 0.1, runImage:
 // one frame per direction (from vars 32/36). Here the direction is taken from
 // the nearest room edge, which is a guess.
 export const EXIT = { objects: ['objNextroom'] };
+// Walk out: native, on touching a live objNextroom, takes the controls and
+// walks the player x-ward at `speed` px a frame for `frames` frames, then
+// changes room keeping that spot (Down Under Floor 1, sampled with Frida:
+// exits at x 328, 316 and 340 all walk left 26 px; arrival on Floor 2 is the
+// walked-to spot). Leftward whatever way the player last moved; what sets the
+// direction for other exits is not read.
+export const EXIT_WALK = { speed: 2, frames: 13, dir: -1 };
 // Walk back: native's Down Under Floor 2 exit leads back to Floor 1 (room 11)
 // rather than on to the next level, and Floor 1 holds the van (objFansVan,
 // an objCar). Here, in a level whose first floor has a car, the last floor's
@@ -1693,7 +1700,7 @@ export async function play(env) {
     if (pressed.has('r') && env.restart) { pressed.clear(); running = false; env.restart(); return; }
     if (p.dead) { mouse.click = mouse.right = false; return; }
     if (p.exec) { stepExec(); mouse.click = mouse.right = false; return; }
-    if (p.ride) { p.hs = p.vs = 0; mouse.click = mouse.right = false; return; }
+    if (p.ride || p.walkOut) { p.hs = p.vs = 0; mouse.click = mouse.right = false; return; }
     if (p.locked) { p.hs = p.vs = 0; mouse.click = mouse.right = false; pressed.clear(); return; }
     if (p.rollCool > 0) p.rollCool--;
     if (p.flash > 0) p.flash--;
@@ -2054,6 +2061,10 @@ export async function play(env) {
   const carEnd = env.carry?.back && room.insts.filter(i => inherits(G, G.objects.get(i.obj), 'objCar') && G.objects.get(i.obj).sprite >= 0)
     .map(i => { const b = maskBox(G, G.objects.get(i.obj), i), k = WALK_BACK.reach; return { x: i.x, y: i.y, box: { l: b.l - k, r: b.r + k, t: b.t - k, b: b.b + k } }; })[0];
   function stepExits() {
+    if (p.walkOut) {
+      p.x += EXIT_WALK.dir * EXIT_WALK.speed;
+      return --p.walkOut.t > 0 ? undefined : leave(null, p.walkOut.exit);
+    }
     const clearFloor = !enemies.some(e => e.isEnemy) && !kos.length && !bosses.length;
     if (clearFloor && !cleared && exits.length) sfx(SOUND.cleared);
     cleared = clearFloor;
@@ -2061,7 +2072,11 @@ export async function play(env) {
       const on = overlap(p, box, x, x.box);
       if (x.off && !overlap(p, x.off, x, x.box)) x.off = false;
       x.live = clearFloor && !x.off;
-      if (x.live && on && !p.dead && !p.exec) return leave(null, x);
+      if (x.live && on && !p.dead && !p.exec) {
+        if (x.kind !== 'objNextroom') return leave(null, x);
+        p.walkOut = { t: EXIT_WALK.frames, exit: x };
+        return;
+      }
     }
     if (carEnd && clearFloor && !p.dead && !p.exec && overlap(p, box, carEnd, carEnd.box)) return leave();
     for (const l of elevators) if (stepElevator(l, clearFloor)) return leave(l);
