@@ -76,7 +76,7 @@ export const FILM_SET = { obj: 'objDirector', walk: 'sprDirectorWalk', speed: 1,
 export const CAR_EXIT = 40;
 const LAYER_PAD = 64;
 // The score HUD as the native view shows it (480x270): right-aligned at
-// x 455, glyph tops at y 20, about 12px of face. The face and its 1px step
+// x 456, glyph tops at y 19, about 12px of face. The face and its 1px step
 // are vertical gradients over `band` (glyph top to bottom on screen): pale to
 // full cyan, and magenta to red.
 // The kill combo, from the exe: each kill bumps the count (global +0x10b0) and
@@ -97,7 +97,9 @@ const HUD = {
   ammo: { black: [[31, 219, true], [35, 223]], back: { x: 34, y: 222, top: ['#ff00ff', '#800080'], bottom: ['#ff0000', '#800000'] },
     face: { x: 32, y: 220, top: '#ffffff', bottom: '#00ffff' } },
 };
-const SCORE_HUD = { font: 'fntPoints', x: 455, y: 18, scale: 1, band: [20, 32],
+// Native's face anchor is (456, 14); this font's glyphs sit 3px lower in web's
+// drawText, so the anchor here is (456, 17) (pixel-checked 2026-10-29).
+const SCORE_HUD = { font: 'fntPoints', x: 456, y: 17, scale: 1, band: [19, 31],
   face: ['#bfffff', '#2cffff'], shadow: ['#f0108a', '#fc0028'] };
 // The wash cycles between two screen-space gradients, purple `a` and teal `b`
 // (top and bottom colours, fitted to the two ends in native Down Under
@@ -2456,10 +2458,11 @@ export async function play(env) {
     cx.restore();
     // The score in fntPoints: the cyan face over a magenta step and a black one.
     // Native shows the score's zeros with the tall 'O' glyph; the font's own '0' is short.
-    const t = String(shownScore).replace(/0/g, 'O') + 'PTS', P = SCORE_HUD;
-    if (pointsFont) for (const [d, c] of [[2, '#000'], [1, P.shadow], [0, P.face]])
-      if (typeof c === 'string') drawText(cx, pointsFont, t, P.x + d, P.y + d, { align: 1, colour: c, scale: P.scale });
-      else cx.drawImage(scoreArt(t, c, d), 0, 0);
+    // Native (0xe040d0) draws black at +3, black at -1+w, the step at +2 and the face at +w.
+    const t = String(shownScore).replace(/0/g, 'O') + 'PTS', P = SCORE_HUD, w = hudW();
+    if (pointsFont) for (const [dx, dy, c] of [[3, 3, '#000'], [w - 1, w - 1, '#000'], [2, 2, P.shadow], [w, w, P.face]])
+      if (typeof c === 'string') drawText(cx, pointsFont, t, P.x + dx, P.y + dy, { align: 1, colour: c, scale: P.scale });
+      else cx.drawImage(scoreArt(t, c, Math.round(dx), Math.round(dy)), 0, 0);
     if (comboFont && slide.c > HUD.slide.from) {
       const t = combo.n + 'x', C = HUD.combo;
       for (const [x, y] of C.black) drawText(cx, comboFont, t, x + slide.c, y, { colour: '#000' });
@@ -2482,14 +2485,14 @@ export async function play(env) {
   }
   // A gradient-filled score line, drawn once per text into a view-sized canvas.
   const scoreCache = new Map();
-  function scoreArt(t, [top, bottom], d) {
-    const key = t + top + d;
+  function scoreArt(t, [top, bottom], dx, dy) {
+    const key = t + top + dx + ',' + dy;
     let c = scoreCache.get(key);
     if (c) return c;
     if (scoreCache.size > 32) scoreCache.clear();
     const P = SCORE_HUD, g = (c = new OffscreenCanvas(VIEW_W, VIEW_H)).getContext('2d');
-    drawText(g, pointsFont, t, P.x + d, P.y + d, { align: 1, colour: '#fff', scale: P.scale });
-    const grad = g.createLinearGradient(0, P.band[0] + d, 0, P.band[1] + d);
+    drawText(g, pointsFont, t, P.x + dx, P.y + dy, { align: 1, colour: '#fff', scale: P.scale });
+    const grad = g.createLinearGradient(0, P.band[0] + dy, 0, P.band[1] + dy);
     grad.addColorStop(0, top); grad.addColorStop(1, bottom);
     g.globalCompositeOperation = 'source-in'; g.fillStyle = grad; g.fillRect(0, 0, VIEW_W, VIEW_H);
     scoreCache.set(key, c);
