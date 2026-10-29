@@ -82,9 +82,21 @@ const LAYER_PAD = 64;
 // The kill combo, from the exe: each kill bumps the count (global +0x10b0) and
 // resets a 180-step timer (+0x51b0); when it runs out with two or more kills,
 // n*(n-1)*250 is added to the score (+0x16b0) and an "<n>xCOMBO" popup rises
-// 24px above the player. While it runs the HUD shows "<n>x" in fntCombo; the
-// exe draws it from a slide-in offset, so its screen spot here is a guess.
-const COMBO = { time: 180, bonus: n => n * (n - 1) * 250, popupDy: 24, font: 'fntCombo', x: 8, y: 6 };
+// 24px above the player. While it runs the HUD shows "<n>x" in fntCombo.
+const COMBO = { time: 180, bonus: n => n * (n - 1) * 250, popupDy: 24, font: 'fntCombo' };
+// The combo and ammo counters, from objEffector's HUD draw 0xe040d0 (Codex,
+// 2026-10-29, re/codex/hud-findings.md). Each is two black copies under two
+// gradient copies, left/top aligned at scale 1. A phase t steps 4 degrees a
+// step; w = 0.5*cos(t) wobbles the ammo face and p = 0.5 + w blends colours
+// (merge_colour) for each copy's top and bottom. Each counter slides in from
+// x -160 at 8px a step while shown (combo over 1 kill, a gun held) and back.
+const HUD = {
+  slide: { from: -160, step: 8 }, phase: 4,
+  combo: { black: [[23, -7], [26, -4]], copies: [{ x: 25, y: -5, dt: 90, top: ['#ff0000', '#ff00ff'], bottom: ['#800000', '#ff0000'] },
+    { x: 24, y: -6, dt: 0, top: ['#ff0000', '#ff00ff'], bottom: ['#800000', '#ff0000'] }] },
+  ammo: { black: [[31, 219, true], [35, 223]], back: { x: 34, y: 222, top: ['#ff00ff', '#800080'], bottom: ['#ff0000', '#800000'] },
+    face: { x: 32, y: 220, top: '#ffffff', bottom: '#00ffff' } },
+};
 const SCORE_HUD = { font: 'fntPoints', x: 455, y: 18, scale: 1, band: [20, 32],
   face: ['#bfffff', '#2cffff'], shadow: ['#f0108a', '#fc0028'] };
 // The wash cycles between two screen-space gradients, purple `a` and teal `b`
@@ -511,7 +523,13 @@ export const CLEARED = { sprite: 'sprFloorCleared', bottom: 44 };
 // The in-game pause (Escape), measured off native Down Under (2026-10-27,
 // 960x540, so 2 native px per view px); its draw code was not read. The frame
 // is not tinted: a few strips slide sideways, the top 3 rows go black and a
-// white static band (solid, then sprStatic) crosses the lower middle. Top left
+// white band runs from y 162 to 8 rows under a base B that moves every step. The VHS
+// helper 0xe58360 (Frida trace of 30 steps, 2026-10-29) then redraws ~1335
+// tinted distortion sprites each step, all with fresh random spots and colours
+// (hue and saturation random, value 1): sprMediumBlackDistortion just above B,
+// sprSmallBlackDistortion in the 8 rows under B, sprSmallWhiteDistortion in
+// the 9 rows under those, a line of them on the band's top edge, and 10 faint
+// rows of them whose heights are picked once per pause. sprStatic is not used.
 // Native symbol: frame 4 of sprVCRSymbol at [34,24], scale [1.5,0.75].
 // Draw call 0x9e9507 was observed through Frida on 2026-10-28.
 // Menu labels remain WAD text ids; no pause-label string is embedded here.
@@ -528,7 +546,9 @@ export const PAUSE = {
     music: ['', '', '    #######', '    #######', '    #     #', '    #     #', '    #     #', '    #     #', '  ###   ###', ' ####  ####', '  ##    ##'],
     speaker: ['', '', '     #', '    ## ##', '   ###   #', ' ##### #  #', ' #####  # #', ' #####  # #', ' ##### #  #', '   ###   #', '    ## ##', '     #'],
   },
-  vhs: { black: 3, bands: [[5, 10, 10], [82, 16, -6], [127, 12, 8]], white: [162, 36], noise: { sprite: 'sprStatic', y: 198, h: 32, speed: 4 } },
+  vhs: { black: 3, bands: [[5, 10, 10], [82, 16, -6], [127, 12, 8]], white: 162, base: [212, 13], under: 8, palette: 32,
+    medium: { sprite: 'sprMediumBlackDistortion', n: 165, rise: 30 }, dark: { sprite: 'sprSmallBlackDistortion', n: 540, rows: 9 },
+    light: { sprite: 'sprSmallWhiteDistortion', n: 310, rows: 10, edge: 120 }, faint: { rows: 10, n: 20, alpha: 0.3 } },
   sound: { open: 'sndPause', close: 'sndUnPause' },
 };
 // objElevator (810, Mall and NewsPaper floors; room start 0x7698e0, step
@@ -912,7 +932,7 @@ export async function play(env) {
   if (fan?.disarm) P.disarm = Object.fromEntries(Object.keys(GUNS).map(g => [g, need(pre + 'Disarm' + g)]));
   P.deadShot = need(pre + 'DeadShot') || need(pre + 'DeadShotgun') || need(pre + 'DeadMachinegun');
   P.deadBlunt = need(pre + 'DeadBlunt') || P.deadShot;
-  const pauseArt = { box: art.get(need(PAUSE.box.sprite)), noise: art.get(need(PAUSE.vhs.noise.sprite)), label: art.get(need(PAUSE.label.sprite)) };
+  const pauseArt = { box: art.get(need(PAUSE.box.sprite)), dust: ['medium', 'dark', 'light'].map(k => { const a = art.get(need(PAUSE.vhs[k].sprite)); return a && { ...a, tint: new Map() }; }), label: art.get(need(PAUSE.label.sprite)) };
   const bulletSprite = need('sprBullet'), clearedArt = art.get(need(CLEARED.sprite)), leaveSprite = Object.fromEntries(Object.entries(IDLE.leave).map(([k, v]) => [k, need(v.sprite)]));
   const box = maskBox(G, pobj);
   const walls = buildSolids(G, room), sol = buildSolids(G, room, BODY.objects, SLIDING.objects, BODY);
@@ -1254,6 +1274,7 @@ export async function play(env) {
     popups.push({ text: pts + 'PTS', x, y, t: POINTS.popup });
   };
   const combo = { n: 0, t: 0 };
+  const slide = { c: HUD.slide.from, a: HUD.slide.from, t: 0 };
   const killed = () => { stats.kills++; combo.n++; combo.t = COMBO.time; };
   const stepCombo = () => {
     if (combo.t <= 0 || --combo.t > 0) return;
@@ -1319,7 +1340,7 @@ export async function play(env) {
   const pauseRow = y => PAUSE.y.findIndex(t => y >= t - 2 && y < t + PAUSE.rowH - 2);
   function setPause(on) {
     if (!!pause === on) return;
-    pause = on ? { sel: 0, t: 0 } : null;
+    pause = on ? { sel: 0, t: 0, rows: Array.from({ length: PAUSE.vhs.faint.rows }, () => random(VIEW_H)) } : null;
     keys.clear(); pressed.clear(); mouse.click = mouse.right = false;
     sfx(on ? PAUSE.sound.open : PAUSE.sound.close);
   }
@@ -2235,6 +2256,9 @@ export async function play(env) {
     if (pause) pause.t++;
     if (env.paused?.() || pause) { keys.clear(); pressed.clear(); mouse.click = mouse.right = false; return; }
     frameClock++;
+    slide.t += HUD.phase;
+    const toward = (v, on) => on ? Math.min(0, v + HUD.slide.step) : Math.max(HUD.slide.from, v - HUD.slide.step);
+    slide.c = toward(slide.c, combo.n > 1); slide.a = toward(slide.a, !!held()?.gun);
     // Keyboard stand-ins for the mouse buttons (see defaultBindings).
     if (pressed.has('f')) mouse.click = true;
     if (pressed.has('e')) mouse.right = true;
@@ -2436,8 +2460,25 @@ export async function play(env) {
     if (pointsFont) for (const [d, c] of [[2, '#000'], [1, P.shadow], [0, P.face]])
       if (typeof c === 'string') drawText(cx, pointsFont, t, P.x + d, P.y + d, { align: 1, colour: c, scale: P.scale });
       else cx.drawImage(scoreArt(t, c, d), 0, 0);
-    if (comboFont && combo.n > 1 && combo.t > 0)
-      for (const [d, c] of [[2, '#000'], [0, '#fff']]) drawText(cx, comboFont, combo.n + 'x', COMBO.x + d, COMBO.y + d, { align: 0, colour: c });
+    if (comboFont && slide.c > HUD.slide.from) {
+      const t = combo.n + 'x', C = HUD.combo;
+      for (const [x, y] of C.black) drawText(cx, comboFont, t, x + slide.c, y, { colour: '#000' });
+      for (const k of C.copies) { const q = hudP(k.dt); gradText(comboFont, t, k.x + slide.c, k.y, mix(...k.top, q), mix(...k.bottom, q)); }
+    }
+  }
+  const hudW = (dt = 0) => 0.5 * Math.cos((slide.t + dt) * RAD), hudP = dt => 0.5 + hudW(dt);
+  // GameMaker's merge_colour on #rrggbb strings.
+  const mix = (a, b, q) => '#' + [1, 3, 5].map(i => Math.round(parseInt(a.substr(i, 2), 16) * (1 - q) + parseInt(b.substr(i, 2), 16) * q).toString(16).padStart(2, '0')).join('');
+  // Text with each glyph shaded top to bottom (draw_text_colour's corners).
+  function gradText(f, t, x, y, top, bottom) {
+    if (f.fallback) { drawText(cx, f, t, x, y, { colour: top }); return; }
+    const w = Math.ceil(textWidth(f, t)) + 2, gs = [...t].map(ch => f.chars.get(ch.codePointAt(0))).filter(g => g && g.h > 0);
+    const h = Math.max(1, ...gs.map(g => g.oy + g.h)), c = new OffscreenCanvas(w, h), g = c.getContext('2d');
+    drawText(g, f, t, 0, 0, { colour: '#fff' });
+    const grad = g.createLinearGradient(0, Math.min(...gs.map(g => g.oy), 0), 0, h);
+    grad.addColorStop(0, top); grad.addColorStop(1, bottom);
+    g.globalCompositeOperation = 'source-in'; g.fillStyle = grad; g.fillRect(0, 0, w, h);
+    cx.drawImage(c, Math.round(x), Math.round(y));
   }
   // A gradient-filled score line, drawn once per text into a view-sized canvas.
   const scoreCache = new Map();
@@ -2531,11 +2572,14 @@ export async function play(env) {
     for (const x of exits) if (x.live) sprite(x.sprite, x.frame, x.x, x.y, 0);
     if (film) sprite(film.sprite, film.arrived ? 0 : film.frame, film.x, film.y, -270 * RAD);
     for (const b of bullets) sprite(bulletSprite, 0, b.x, b.y, -b.dir * RAD);
-    if (held()?.gun) {
-      // The ammo count in the wad's fntAmmo; its spot on screen is a guess.
-      const t = `${held().label || p.weapon} ${p.ammo}`;
-      if (ammoFont) for (const [d, c] of [[1, '#000'], [0, '#fff']]) drawText(cx, ammoFont, t, 8 - sx + d, VIEW_H - 24 - sy + d, { align: 0, colour: c });
-      else { cx.font = 'bold 12px monospace'; cx.fillStyle = '#fff'; cx.fillText(t, 8 - sx, VIEW_H - 8 - sy); }
+    if (slide.a > HUD.slide.from) {
+      // The ammo count (two digits) in fntAmmo, see HUD.
+      const t = String(Math.max(0, p.ammo ?? 0)).padStart(2, '0'), A = HUD.ammo, w = hudW(), q = 0.5 + w, ax = slide.a - sx;
+      if (ammoFont) {
+        for (const [x, y, wob] of A.black) drawText(cx, ammoFont, t, x + ax + (wob ? w : 0), y - sy + (wob ? w : 0), { colour: '#000' });
+        gradText(ammoFont, t, A.back.x + ax, A.back.y - sy, mix(...A.back.top, q), mix(...A.back.bottom, q));
+        gradText(ammoFont, t, A.face.x + ax + w, A.face.y - sy + w, A.face.top, A.face.bottom);
+      } else { cx.font = 'bold 12px monospace'; cx.fillStyle = '#fff'; cx.fillText(t, A.face.x + ax, A.face.y + 12 - sy); }
     }
     if (p.dead) {
       sprite(p.dead.sprite, p.dead.frame, p.x, p.y, -p.dead.angle * RAD);
@@ -2569,21 +2613,50 @@ export async function play(env) {
     }
   }
 
+  // One random frame of a distortion sprite, multiplied by one of a fixed set
+  // of random colours (GameMaker's blend colour), baked on first use.
+  const dustPalette = Array.from({ length: PAUSE.vhs.palette }, () => {
+    const h = random(6), s = Math.random(), f = h % 1, k = [1, 1 - s * f, 1 - s, 1 - s, 1 - s * (1 - f), 1];
+    const ch = o => Math.round(255 * k[(Math.floor(h) + o) % 6]);
+    return `rgb(${ch(0)},${ch(4)},${ch(2)})`;
+  });
+  function dustFrame(a) {
+    const fi = Math.floor(random(a.hit.frames.length)), ci = Math.floor(random(dustPalette.length)), key = fi * 64 + ci;
+    let c = a.tint.get(key);
+    if (c === undefined) {
+      const f = a.hit.frames[fi], img = imgs.get(a.hit.atlas);
+      if (!f || !img) return null;
+      c = document.createElement('canvas'); c.width = f.w; c.height = f.h;
+      const t = c.getContext('2d');
+      t.drawImage(img, f.x, f.y, f.w, f.h, 0, 0, f.w, f.h);
+      t.globalCompositeOperation = 'multiply'; t.fillStyle = dustPalette[ci]; t.fillRect(0, 0, f.w, f.h);
+      t.globalCompositeOperation = 'destination-in'; t.drawImage(img, f.x, f.y, f.w, f.h, 0, 0, f.w, f.h);
+      a.tint.set(key, c);
+    }
+    return c;
+  }
   function drawPause() {
     const P = PAUSE, V = P.vhs, C = P.colour;
     cx.save();
     for (const [y, h, dx] of V.bands) cx.drawImage(canvas, 0, y, VIEW_W, h, dx, y, VIEW_W, h);
     cx.fillStyle = '#000'; cx.fillRect(0, 0, VIEW_W, V.black);
-    cx.fillStyle = '#fff'; cx.fillRect(0, V.white[0], VIEW_W, V.white[1]);
-    const nz = pauseArt.noise, img = nz && imgs.get(nz.hit.atlas);
-    if (img) {
-      // Two offset layers of static, screened, leave the band mostly white.
-      cx.globalCompositeOperation = 'screen';
-      const fs = nz.hit.frames, f = fs[Math.floor(pause.t / V.noise.speed) % fs.length], end = V.noise.y + V.noise.h;
-      for (const off of [0, Math.floor(f.w / 2)]) for (let x = -off; x < VIEW_W; x += f.w)
-        for (let y = V.noise.y; y < end; y += f.h) { const h = Math.min(f.h, end - y); cx.drawImage(img, f.x, f.y, f.w, h, x, y, f.w, h); }
-      cx.globalCompositeOperation = 'source-over';
-    }
+    const B = V.base[0] + random(V.base[1]);
+    cx.fillStyle = '#fff'; cx.fillRect(0, V.white, VIEW_W, B + V.under - V.white);
+    const [med, dark, light] = pauseArt.dust, lo = u => Math.floor(u * u * 10);
+    const dot = (a, x, y, alpha = 1, xs = 1, ys = 1) => {
+      const img = a && dustFrame(a);
+      if (!img) return;
+      cx.globalAlpha = alpha;
+      if (xs === 1 && ys === 1) cx.drawImage(img, x - a.s.ox, y - a.s.oy);
+      else { cx.setTransform(xs, 0, 0, ys, x, y); cx.drawImage(img, -a.s.ox, -a.s.oy); cx.setTransform(1, 0, 0, 1, 0, 0); }
+    };
+    const scl = () => { const u = Math.random(); return (Math.random() < 0.5 ? -1 : 1) * u * (1 + 0.9 * u); };
+    for (let i = 0; i < V.medium.n; i++) dot(med, random(VIEW_W), B - 2 - V.medium.rise * (1 - Math.sqrt(Math.random())), 1 - random(0.25), scl(), scl());
+    for (let i = 0; i < V.dark.n; i++) dot(dark, random(VIEW_W), B + V.dark.rows - 1 - Math.min(V.dark.rows - 1, lo(Math.random())));
+    for (let i = 0; i < V.light.n; i++) dot(light, random(VIEW_W), B + 8 + Math.min(V.light.rows - 1, lo(Math.random())));
+    for (let i = 0; i < V.light.edge; i++) dot(light, random(VIEW_W), V.white + (i & 1));
+    for (const y of pause.rows) for (let i = 0; i < V.faint.n; i++) dot(light, random(VIEW_W), y + random(3), random(V.faint.alpha));
+    cx.globalAlpha = 1;
     const L = P.label;
     const label = pauseArt.label, labelImg = label && imgs.get(label.hit.atlas);
     if (labelImg) {

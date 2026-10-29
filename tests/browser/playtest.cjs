@@ -162,6 +162,35 @@ async function punchAndFinish(page) {
       await page.keyboard.press('r'); await page.waitForFunction(() => window.game && window.game !== window.oldGame);
       assert.equal(await page.evaluate(() => window.game.enemies.length), 1);
     });
+    await check('Escape pauses without leaving the level', async () => {
+      await page.keyboard.press('Escape');
+      const state = await page.evaluate(() => ({ paused: window.game.paused, room: window.game.room }));
+      assert.equal(state.paused, true); assert.equal(state.room, 'rmTutorialFloor1');
+    });
+    await check('Held movement keys do not move the player while paused', async () => {
+      const before = await page.evaluate(() => ({ x: window.game.player.x, y: window.game.player.y }));
+      await page.keyboard.down('d'); await delay(500); await page.keyboard.up('d');
+      assert.deepEqual(await page.evaluate(() => ({ x: window.game.player.x, y: window.game.player.y })), before);
+    });
+    await check('Enter on the PLAY row unpauses', async () => {
+      await page.keyboard.press('Enter');
+      assert.equal(await page.evaluate(() => window.game.paused), false);
+    });
+    await check('Escape twice also unpauses', async () => {
+      await page.keyboard.press('Escape');
+      assert.equal(await page.evaluate(() => window.game.paused), true);
+      await page.keyboard.press('Escape');
+      assert.equal(await page.evaluate(() => window.game.paused), false);
+    });
+    await check('The EJECT row returns to the level selection screen', async () => {
+      await page.keyboard.press('Escape');
+      // PLAY is the first row and the dim second row is skipped, so four downs reach EJECT, the last.
+      for (let i = 0; i < 4; i++) await page.keyboard.press('s');
+      await page.keyboard.press('Enter');
+      await page.waitForFunction(() => !window.game && document.querySelector('#status').textContent.startsWith('rmTutorialFloor1:'));
+    });
+    // EJECT left the level, so the checks below need the room back.
+    await page.locator('#play').click(); await page.waitForFunction(() => window.game?.room === 'rmTutorialFloor1');
     await check('Gun pickup, ammunition, firing, throwing and empty-gun behavior', async () => {
       await page.evaluate(() => Object.assign(window.game.player, { x: 125, y: 170, hs: 0, vs: 0 }));
       await pointAt(page, 160, 135, 'right');
