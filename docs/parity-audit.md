@@ -32,6 +32,21 @@
   and alarm snapshot state first. A teleport bot got the player shot, and the
   bot's player address is a copy, so teleporting it does nothing. Floor 2 still
   needs a real clear; Codex is finding the instance layout and clear gate.
+- Native Floor 2, reached properly: the exit was off because Floor 1's exit is
+  also the arrival exit, and its step 0x939c70 only turns it on once no
+  objEnemy, objKnockedOut or third object (0x19a2da8) exists. Faking those
+  existence results for the step and collision (Frida, no kills) let the real
+  collision and alarm1 run: native loaded room 12 and stayed up. Web's Floor 2
+  through its Floor 1 exit matches native's frame: same rooms, walls, enemy
+  spot and score HUD. The camera sits about 50 px apart (native's cursor was
+  off centre, which leads the camera).
+- Arrival spot differs: native put the player at (302,30) on Floor 2 after
+  leaving Floor 1 at (328,30); web keeps (328,30). Back on Floor 1 native kept
+  (348,30). Rule not yet read.
+- Walk back: native's Floor 2 exit goes back to Floor 1 (room 11). Web goes
+  straight on to the next level room. Floor 1 holds objFansVan and objHBorder,
+  so the level presumably ends at the van after walking back down. Codex is
+  reading the exit's target choice and the van/border ends.
 - Playtest: five pause-menu checks added (35/35).
 
 ## 2026-10-28: native pause-symbol renderer recovered
