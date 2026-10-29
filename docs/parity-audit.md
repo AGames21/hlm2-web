@@ -1,5 +1,24 @@
 # Original-game comparison: 2026-10-23
 
+## 2026-10-29: pause motion and combo/ammo HUD
+
+- Pause VHS: a Frida trace of 30 native pause steps (VHS helper 0xe58360,
+  about 1335 draws a step) replaced the guessed sprStatic band. Each step
+  picks a new base line (212 + random 13) and redraws tinted
+  sprMediumBlackDistortion, sprSmallBlackDistortion and sprSmallWhiteDistortion
+  around it, plus a line on the white band's top edge and 10 faint rows whose
+  heights are fixed per pause. The white band now spans y 162 to 8 rows past
+  the base. Row-brightness profiles of web and six native frames match in shape.
+  Measured: counts, spots, scale, alpha and colour ranges. Fitted: the
+  distributions' exact curves.
+- Combo and ammo HUD: Codex read objEffector's HUD draw 0xe040d0 statically
+  (re/codex/hud-findings.md). Combo sits at (25,-5) and ammo at (32,220), each
+  as two black copies plus two gradient copies, with the ammo wobble (+-0.5 px),
+  colour blends and the 8 px/step slide from -160. Not yet compared against a
+  native screenshot. The alternate HUD 0x1108450 with a second ammo field and
+  the 0xdcbd30 hide predicate are not ported.
+- Playtest: five pause-menu checks added (35/35).
+
 ## 2026-10-28: native pause-symbol renderer recovered
 
 - Started clean at c7736f3. Read the private handoff and current audit.
