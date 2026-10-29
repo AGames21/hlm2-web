@@ -22,8 +22,16 @@
   (455+w,13+w), magenta at (458,16) and the face at (456+w,14+w), so the score
   also wobbles. Web now draws all four; its fntPoints anchor sits 3 px lower
   (456,17) to land on the same pixels (face box within the wobble pixel).
-- Still open: which wad text the ammo field shows instead of a number (no gun,
-  melee, empty) and when it slides in for those states.
+- Ammo text states (Codex, re/codex/ammo-states.md, static): a held gun shows
+  its count zero-padded to two digits, an empty gun shows wad text 3009 and
+  stays on screen, no gun gives 3012 and hides. Web now does the first two.
+  Not ported: the scripted overrides (progression helper 0xf44230, the police
+  rooms 75/320 and prison rooms 294/369 texts).
+- Native Floor 2: writing the engine's pending room (engine+0x2ec = 12) loads
+  room 12, but native crashes about 1 s later because objNextroom's collision
+  and alarm snapshot state first. A teleport bot got the player shot, and the
+  bot's player address is a copy, so teleporting it does nothing. Floor 2 still
+  needs a real clear; Codex is finding the instance layout and clear gate.
 - Playtest: five pause-menu checks added (35/35).
 
 ## 2026-10-28: native pause-symbol renderer recovered
