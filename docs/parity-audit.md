@@ -43,6 +43,12 @@
 - Arrival spot differs: native put the player at (302,30) on Floor 2 after
   leaving Floor 1 at (328,30); web keeps (328,30). Back on Floor 1 native kept
   (348,30). Rule not yet read.
+- Van get-in ported (re/agents/level-end.md): back at the start with the
+  floors cleared, touching the van (objCar) opens the door (+0.5 a frame to
+  frame 6, sndCarOpen), pulls the player in 2 px a frame to within 12 px and
+  hides them, closes the door (-0.25 a frame) with sndCarClose, then plays
+  sndCarStart and the Start sprite to frame 5 before the room ends. Web
+  drive: Floor 1 -> Floor 2 -> back -> van -> rmPizzaPlace.
 - Arrival spot read and ported: touching a live objNextroom, native takes
   the controls and walks the player left 2 px a frame for about 13 frames,
   then changes room keeping that spot (Frida samples: exits at x 328, 316

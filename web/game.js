@@ -494,10 +494,17 @@ export const EXIT_WALK = { speed: 2, frames: 13, dir: -1 };
 // exit starts the walk back (app.js walkBack): each exit then leads one floor
 // down and shows sprGreyArrow (alarm1 0x937290 gives it to exits whose tag is
 // a floor already done), and on the first floor the level ends once the
-// player is within `reach` px of the car's mask. How native ends it at the
-// van (objFansVan step 0x7ed400, objHBorder 0x8410b0) is not read; the car
-// end and the reach are guesses.
-export const WALK_BACK = { reach: 8 };
+// player's mask touches the car's (re/agents/level-end.md: objCopCar step
+// 0x67a690, objFansVan 0x7f075d place_meeting, gated on the level-cleared
+// flag). Getting in, as native: one touch commits; the car pulls the player
+// `pull` px a frame toward its origin until within `inside` px, hides them,
+// closes the door (frame -`close` a frame down to 0.25), plays sndCarStart and
+// runs the ...Start sprite (+`run` a frame up to frame `runTo`), then the
+// level ends. The door opens (+`open` a frame up to frame `doorTo`) while the
+// player is within `door` px and the floor is clear, else closes (-`close`).
+// The floor order of the walk back is a guess (native maps exit tags).
+export const WALK_BACK = { reach: 0, pull: 2, inside: 12, door: 80, open: 0.5, close: 0.25, doorTo: 6, run: 0.25, runTo: 5,
+  openSound: 'sndCarOpen', closeSound: 'sndCarClose', startSound: 'sndCarStart' };
 // How near the van the player walks to leave the hideout. Native, after the talk plays
 // through, starts the level between x 136 and 123 at the van's door (van at 96,172):
 // its collision event with the van's mask, which creation code turns to 270.
@@ -1241,7 +1248,13 @@ export async function play(env) {
 
   // Pre-render the room into the layers under and over the player, leaving
   // out everything that moves.
-  const dynamic = new Set([spawn, ...enemies.map(e => e.inst), ...doors.map(d => d.inst), ...weapons.map(w => w.inst), ...exits.map(x => x.inst), ...screens.map(s => s.inst), ...sliders.map(d => d.inst), ...elevators.map(l => l.inst), ...bosses.flatMap(b => [b.inst, b.actor].filter(Boolean)), film?.inst]);
+  const carEnd = env.carry?.back && room.insts.filter(i => inherits(G, G.objects.get(i.obj), 'objCar') && G.objects.get(i.obj).sprite >= 0)
+    .map(i => {
+      const o = G.objects.get(i.obj), b = maskBox(G, o, i), k = WALK_BACK.reach, name = G.sprites.get(o.sprite)?.name;
+      return { inst: i, x: i.x, y: i.y, box: { l: b.l - k, r: b.r + k, t: b.t - k, b: b.b + k }, sprite: need(name), start: need(name + 'Start'),
+        frame: 0, phase: null };
+    }).filter(c => c.sprite)[0];
+  const dynamic = new Set([spawn, carEnd?.inst, ...enemies.map(e => e.inst), ...doors.map(d => d.inst), ...weapons.map(w => w.inst), ...exits.map(x => x.inst), ...screens.map(s => s.inst), ...sliders.map(d => d.inst), ...elevators.map(l => l.inst), ...bosses.flatMap(b => [b.inst, b.actor].filter(Boolean)), film?.inst]);
   // Art may hang past the room's edges (the Fans' van sits 11px below
   // rmFansLevel1Floor1); the exe draws it there, so the layers keep a margin.
   const layer = (keep) => {
@@ -1700,7 +1713,7 @@ export async function play(env) {
     if (pressed.has('r') && env.restart) { pressed.clear(); running = false; env.restart(); return; }
     if (p.dead) { mouse.click = mouse.right = false; return; }
     if (p.exec) { stepExec(); mouse.click = mouse.right = false; return; }
-    if (p.ride || p.walkOut) { p.hs = p.vs = 0; mouse.click = mouse.right = false; return; }
+    if (p.ride || p.walkOut || p.carIn) { p.hs = p.vs = 0; mouse.click = mouse.right = false; return; }
     if (p.locked) { p.hs = p.vs = 0; mouse.click = mouse.right = false; pressed.clear(); return; }
     if (p.rollCool > 0) p.rollCool--;
     if (p.flash > 0) p.flash--;
@@ -2058,8 +2071,30 @@ export async function play(env) {
   const autoEnd = !exits.length && !elevators.length && !coupleRoom && !film && (!cleared || talks.length > 0 ||
     room.insts.some(i => ROOM_END.auto.includes(G.objects.get(i.obj)?.name)));
   let endWait = 0;
-  const carEnd = env.carry?.back && room.insts.filter(i => inherits(G, G.objects.get(i.obj), 'objCar') && G.objects.get(i.obj).sprite >= 0)
-    .map(i => { const b = maskBox(G, G.objects.get(i.obj), i), k = WALK_BACK.reach; return { x: i.x, y: i.y, box: { l: b.l - k, r: b.r + k, t: b.t - k, b: b.b + k } }; })[0];
+  // Returns true once the player is in and the car has started (WALK_BACK).
+  function stepCar(c, clearFloor) {
+    const W = WALK_BACK, last = frames(c.sprite) - 1;
+    if (!c.phase) {
+      const near = clearFloor && !p.dead && Math.hypot(p.x - c.x, p.y - c.y) < W.door;
+      if (near && c.frame === 0) sfx(W.openSound);
+      if (!near && c.frame === Math.min(W.doorTo, last)) sfx(W.closeSound);
+      c.frame = near ? Math.min(W.doorTo, last, c.frame + W.open) : Math.max(0, c.frame - W.close);
+      if (clearFloor && !p.dead && !p.exec && overlap(p, box, c, c.box)) { c.phase = 'in'; p.carIn = true; }
+      return false;
+    }
+    if (c.phase === 'in') {
+      const d = Math.hypot(c.x - p.x, c.y - p.y);
+      if (d > W.inside) { p.x += (c.x - p.x) / d * W.pull; p.y += (c.y - p.y) / d * W.pull; }
+      else { p.sceneHidden = true; c.phase = 'close'; }
+    } else if (c.phase === 'close') {
+      if ((c.frame = Math.max(0.25, c.frame - W.close)) <= 0.25) {
+        sfx(W.startSound);
+        c.phase = 'start';
+        if (c.start) { c.sprite = c.start; c.frame = 0; }
+      }
+    } else if (!c.start || (c.frame = Math.min(W.runTo, frames(c.sprite) - 1, c.frame + W.run)) >= Math.min(W.runTo, frames(c.sprite) - 1)) return true;
+    return false;
+  }
   function stepExits() {
     if (p.walkOut) {
       p.x += EXIT_WALK.dir * EXIT_WALK.speed;
@@ -2078,7 +2113,7 @@ export async function play(env) {
         return;
       }
     }
-    if (carEnd && clearFloor && !p.dead && !p.exec && overlap(p, box, carEnd, carEnd.box)) return leave();
+    if (carEnd && stepCar(carEnd, clearFloor)) return leave();
     for (const l of elevators) if (stepElevator(l, clearFloor)) return leave(l);
     if (coupleRoom && !enemies.length && !kos.length && !p.exec && !p.dead && ++cutWait > COUPLE.cut) return leave();
     if (film?.arrived && !talks.length && !env.cutscene && ++film.wait > FILM_SET.after) return leave();
@@ -2587,6 +2622,7 @@ export async function play(env) {
     for (const d of dead) sprite(d.sprite, d.frame, d.x, d.y, -d.angle * RAD);
     for (const q of pieces) sprite(BURST.piece, 0, q.x, q.y, -q.angle * RAD);
     for (const s of screens) sprite(s.sprite, s.frame, s.x, s.y, 0);
+    if (carEnd) sprite(carEnd.sprite, Math.floor(carEnd.frame), carEnd.x, carEnd.y, 0);
     for (const d of sliders) sprite(d.sprite, Math.floor(d.frame), d.x, d.y, 0);
     for (const l of elevators) sprite(l.sprite, Math.floor(l.frame), l.x, l.y, 0);
     for (const k of kos) sprite(k.sprite, k.frame, k.x, k.y, -(k.angle + (k.fallbackPose ? 90 : 0)) * RAD);
