@@ -2576,8 +2576,8 @@ export async function play(env) {
     if (film) sprite(film.sprite, film.arrived ? 0 : film.frame, film.x, film.y, -270 * RAD);
     for (const b of bullets) sprite(bulletSprite, 0, b.x, b.y, -b.dir * RAD);
     if (slide.a > HUD.slide.from) {
-      // The ammo count (two digits) in fntAmmo, see HUD.
-      const t = String(Math.max(0, p.ammo ?? 0)).padStart(2, '0'), A = HUD.ammo, w = hudW(), q = 0.5 + w, ax = slide.a - sx;
+      // The ammo count in fntAmmo, see HUD: at least two digits, or wad text 3009 when empty (native 0xe040d0).
+      const n = Math.max(0, p.ammo ?? 0), t = n > 0 ? String(n).padStart(2, '0') : (G.text?.[3009] ?? '00'), A = HUD.ammo, w = hudW(), q = 0.5 + w, ax = slide.a - sx;
       if (ammoFont) {
         for (const [x, y, wob] of A.black) drawText(cx, ammoFont, t, x + ax + (wob ? w : 0), y - sy + (wob ? w : 0), { colour: '#000' });
         gradText(ammoFont, t, A.back.x + ax, A.back.y - sy, mix(...A.back.top, q), mix(...A.back.bottom, q));
