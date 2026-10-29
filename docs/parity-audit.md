@@ -43,6 +43,14 @@
 - Arrival spot differs: native put the player at (302,30) on Floor 2 after
   leaving Floor 1 at (328,30); web keeps (328,30). Back on Floor 1 native kept
   (348,30). Rule not yet read.
+- Sewer entrance ending ported (re/agents/endings-indoor.md): the trigger is
+  objSewerEntrance (step 0xb4d5c0), not the grate: floor clear, player within
+  4 px of its y and touching it at x+-4, then 28 climb steps and the 12-step
+  fade to rmSewersFloor1 (SEWER). Web drive: 12 px off the row stays, on the
+  row leaves. objHBorder is not an exit (it only removes itself); Fans 5
+  floors still use the timed auto end in place of the walkie radio call.
+  Open: rmPoliceStationFloor2Part2 ends through objGirlRevenge (state 9, R,
+  then MovieSet, rmScore, rmPart), not ported.
 - Van get-in ported (re/agents/level-end.md): back at the start with the
   floors cleared, touching the van (objCar) opens the door (+0.5 a frame to
   frame 6, sndCarOpen), pulls the player in 2 px a frame to within 12 px and

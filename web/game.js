@@ -521,16 +521,24 @@ export const INTRO_VAN_REACH = 4;
 // that fits every jungle room's layout.
 export const START_POINT = { object: 'objStartPoint', reach: 24 };
 // Rooms with no objNextroom, elevator or second start point end some other
-// way: the sewer grate is kicked open (objSewerGrateKick 0xba0fe0 /
-// objSewerEntrance), the power plant cave mouth (objCaveOpening step 0x619540)
+// way: the sewer grate is kicked open (objSewerEntrance step 0xb4d5c0, see
+// SEWER below), the power plant cave mouth (objCaveOpening step 0x619540)
 // and the vault door (objVaultOpening 0xba4f00) are walked into, and the rest
-// (objHBorder 0x8410b0 calling room_goto_next, objDeathWishRoof, objLSD) move on
-// by themselves once the floor is clear. Their decompiled events are not fully
+// (objDeathWishRoof, objLSD) move on by themselves once the floor is clear.
+// objHBorder (0x8410b0) never changes room, it only removes itself; it stays
+// in `auto` as the marker of the Fans 5 floors, which end through the
+// floor-clear script 0xfeb050, objWalkieTalkie and the Zebra radio call
+// (re/agents/endings-indoor.md), roughly the `wait` here. Their decompiled events are not fully
 // read: here the objects below are walk-on exits once the floor is clear (a box
 // of half-size `reach`), a room with one start point leaves from it, and any
 // other such room moves on `wait` steps after it is clear.
-export const ROOM_END = { objects: ['objSewerGrateKick', 'objCaveOpening', 'objVaultOpening'], reach: 24, wait: 90,
+export const ROOM_END = { objects: ['objSewerEntrance', 'objCaveOpening', 'objVaultOpening'], reach: 24, wait: 90,
   auto: ['objHBorder', 'objDeathWishRoof', 'objLSD', 'objFather'] };
+// objSewerEntrance step 0xb4d5c0: once no enemy or knocked-out one is left,
+// the player within `row` px of its y and touching it at x±`side` kicks the
+// grate, climbs down (image_index +0.25 to 7, `climb` steps) and the
+// objEffector fade (180 at 15 a step, `fade`) takes them to room_next.
+export const SEWER = { object: 'objSewerEntrance', row: 4, side: 4, climb: 28, fade: 12 };
 // TVs and monitors (objTVBig 215 step 0xc0af10, objWallTV step 0xc67670,
 // objComputerMonitorBlack/Grey steps 0x5eff60 / 0x5fa6b0; their objBullet and
 // objEBullet collisions 0xc01da0 / 0xc065a0 and kin): a round from either side
@@ -1136,7 +1144,8 @@ export async function play(env) {
     // The lone start point is where the player came in, so it stays off until they step off it.
     for (const i of ends.length ? ends : starts.length === 1 ? starts : []) {
       const edges = [room.w - i.x, i.y, i.x, room.h - i.y];
-      exits.push({ inst: i, kind: G.objects.get(i.obj).name, x: i.x, y: i.y, box, off: i === entry, live: false,
+      const o = G.objects.get(i.obj), m = o.name === SEWER.object && maskBox(G, o, i);
+      exits.push({ inst: i, kind: o.name, x: i.x, y: i.y, box: m ? { ...m, l: m.l - SEWER.side, r: m.r + SEWER.side } : box, off: i === entry, live: false,
         sprite: arrow, frame: edges.indexOf(Math.min(...edges)) });
     }
   }
@@ -2097,7 +2106,7 @@ export async function play(env) {
   }
   function stepExits() {
     if (p.walkOut) {
-      p.x += EXIT_WALK.dir * EXIT_WALK.speed;
+      p.x += p.walkOut.dx ?? EXIT_WALK.dir * EXIT_WALK.speed;
       return --p.walkOut.t > 0 ? undefined : leave(null, p.walkOut.exit);
     }
     const clearFloor = !enemies.some(e => e.isEnemy) && !kos.length && !bosses.length;
@@ -2108,6 +2117,10 @@ export async function play(env) {
       if (x.off && !overlap(p, x.off, x, x.box)) x.off = false;
       x.live = clearFloor && !x.off;
       if (x.live && on && !p.dead && !p.exec) {
+        if (x.kind === SEWER.object) {
+          if (Math.abs(p.y - x.y) <= SEWER.row) p.walkOut = { t: SEWER.climb + SEWER.fade, exit: x, dx: 0 };
+          return;
+        }
         if (x.kind !== 'objNextroom') return leave(null, x);
         p.walkOut = { t: EXIT_WALK.frames, exit: x };
         return;
