@@ -14,9 +14,16 @@
 - Combo and ammo HUD: Codex read objEffector's HUD draw 0xe040d0 statically
   (re/codex/hud-findings.md). Combo sits at (25,-5) and ammo at (32,220), each
   as two black copies plus two gradient copies, with the ammo wobble (+-0.5 px),
-  colour blends and the 8 px/step slide from -160. Not yet compared against a
-  native screenshot. The alternate HUD 0x1108450 with a second ammo field and
+  colour blends and the 8 px/step slide from -160. A Frida probe of the live
+  text draws confirmed every anchor, and a native frame with the HUD forced on
+  screen matches web's ammo glyphs (same baseline, within 1 px). The alternate HUD 0x1108450 with a second ammo field and
   the 0xdcbd30 hide predicate are not ported.
+- Score HUD: the same probe shows four copies, black at (459,17), black at
+  (455+w,13+w), magenta at (458,16) and the face at (456+w,14+w), so the score
+  also wobbles. Web now draws all four; its fntPoints anchor sits 3 px lower
+  (456,17) to land on the same pixels (face box within the wobble pixel).
+- Still open: which wad text the ammo field shows instead of a number (no gun,
+  melee, empty) and when it slides in for those states.
 - Playtest: five pause-menu checks added (35/35).
 
 ## 2026-10-28: native pause-symbol renderer recovered
