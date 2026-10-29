@@ -4,7 +4,7 @@
 import { Wad } from './agar.js';
 import * as T from './tables.js';
 import { INSTCC } from './instcc.js';
-import { play, musicFor, SOUND, pickerStart } from './game.js';
+import { play, musicFor, SOUND, pickerStart, inherits } from './game.js';
 import { Audio, RemoteFile } from './audio.js';
 import { scoreScreen } from './score.js';
 import { frontEnd, card, maskMenu, PICKER_OBJECTS, abortMenu, STORY, progress, records, options } from './menu.js';
@@ -297,7 +297,8 @@ async function showScore(level, stats) {
 // facing edge at the same place along it, the closest match winning, and the
 // player steps in `inset` px from an edge. A guess from the room layouts.
 // Once every hub room is cleared the exits go on in room order (skipping the
-// rooms done), which ends the level; the walk back to the car is not ported.
+// rooms done), which ends the level; the walk back to the car is not ported
+// for hub levels.
 const HUB = { levels: ['rmBank', 'rmStripClub', 'rmBoat', 'rmSonMansion', 'rmSubway'], edge: 48, stairs: 40, along: 128, inset: 24 };
 const exitsOf = r => r.insts.filter(i => G.objects.get(i.obj)?.name === 'objNextroom');
 const edgeOf = (r, i) => { const d = [r.w - i.x, i.y, i.x, r.h - i.y], m = Math.min(...d); return m <= HUB.edge ? d.indexOf(m) : -1; };
@@ -327,6 +328,22 @@ function hubNext(room, carry) {
   return link.room;
 }
 const done = (r, carry) => !!carry?.level?.rooms[r.name];
+// Walk back (game.js WALK_BACK): the floors of a level that has a car on its
+// first floor, in room order. Leaving the last floor by its exit turns
+// `carry.back` on and goes one floor down; so does every exit after that,
+// except the first floor's, which goes up again. Returns the room to go to,
+// or null when the level goes on as before (no car, a hub level, or the
+// player left by the car).
+function walkBack(room, carry) {
+  if (!carry?.exit || HUB.levels.includes(levelOf(room.name))) return null;
+  const floors = G.rooms.order.map(id => G.rooms.list.find(r => r.id === id)).filter(r => r && !/Test$/.test(r.name) &&
+    isHard(r.name) === isHard(room.name) && levelOf(r.name) === levelOf(room.name) && exitsOf(r).length);
+  const k = floors.indexOf(room);
+  if (k < 0 || floors.length < 2 || !floors[0].insts.some(i => inherits(G, G.objects.get(i.obj), 'objCar'))) return null;
+  if (!carry.back && k !== floors.length - 1) return null;
+  carry.back = true;
+  return floors[k ? k - 1 : 1];
+}
 
 // An exit was taken: play the next room in the game's room order
 // (room_goto_next). The Hard copies and test rooms that sit in the order are
@@ -336,7 +353,7 @@ const done = (r, carry) => !!carry?.level?.rooms[r.name];
 function nextFloor(room, carry) {
   if (story) return storyNext(room, carry);
   const order = G.rooms.order;
-  let next = hubNext(room, carry);
+  let next = walkBack(room, carry) || hubNext(room, carry);
   for (let i = order.indexOf(room.id) + 1; i > 0 && i < order.length && !next; i++) {
     const r = G.rooms.list.find(r => r.id === order[i]);
     if (r && !/Test$/.test(r.name) && (isHard(room.name) || !isHard(r.name)) && !done(r, carry)) next = r;
@@ -411,7 +428,7 @@ function startLevel() {
 function storyNext(room, carry) {
   if (story.intro) { startLevel(); return true; }
   const order = G.rooms.order;
-  let next = hubNext(room, carry);
+  let next = walkBack(room, carry) || hubNext(room, carry);
   for (let i = order.indexOf(room.id) + 1; i > 0 && i < order.length && !next; i++) {
     const r = G.rooms.list.find(r => r.id === order[i]);
     if (r && !/Test$/.test(r.name) && !isHard(r.name) && !done(r, carry)) next = r;

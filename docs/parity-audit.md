@@ -47,6 +47,14 @@
   straight on to the next level room. Floor 1 holds objFansVan and objHBorder,
   so the level presumably ends at the van after walking back down. Codex is
   reading the exit's target choice and the van/border ends.
+- Walk back ported: in a level whose first floor has a car, the last floor's
+  exit now leads one floor down with grey arrows, and on the first floor the
+  level ends at the car. Web run with the real files: Floor 2's exit returned
+  to Floor 1 with the player at (348,30), as native did, and walking to the
+  van went on to the next level. Native's own van end (objFansVan step
+  0x7ed400, objHBorder 0x8410b0) and the exit tag choice (alarm1 0x937290)
+  are not fully read, so the car end and the floor order are guesses. Hub
+  levels are unchanged. Codex hit its usage limit, so this was read directly.
 - Playtest: five pause-menu checks added (35/35).
 
 ## 2026-10-28: native pause-symbol renderer recovered

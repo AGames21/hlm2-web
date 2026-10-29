@@ -481,6 +481,16 @@ export const DOG = { recheck: 10, speed: 4, kill: 22, imageSpeed: 0.1, runImage:
 // one frame per direction (from vars 32/36). Here the direction is taken from
 // the nearest room edge, which is a guess.
 export const EXIT = { objects: ['objNextroom'] };
+// Walk back: native's Down Under Floor 2 exit leads back to Floor 1 (room 11)
+// rather than on to the next level, and Floor 1 holds the van (objFansVan,
+// an objCar). Here, in a level whose first floor has a car, the last floor's
+// exit starts the walk back (app.js walkBack): each exit then leads one floor
+// down and shows sprGreyArrow (alarm1 0x937290 gives it to exits whose tag is
+// a floor already done), and on the first floor the level ends once the
+// player is within `reach` px of the car's mask. How native ends it at the
+// van (objFansVan step 0x7ed400, objHBorder 0x8410b0) is not read; the car
+// end and the reach are guesses.
+export const WALK_BACK = { reach: 8 };
 // How near the van the player walks to leave the hideout. Native, after the talk plays
 // through, starts the level between x 136 and 123 at the van's door (van at 96,172):
 // its collision event with the van's mask, which creation code turns to 270.
@@ -630,7 +640,7 @@ export const RESTART = { text: 3050, key: /\[R\]/, font: 'fntLabel', scale: 1.38
 export const EXEC = { scale: 2, imageSpeed: 0.25, hammerShift: 4 };
 
 
-function inherits(G, o, name) {
+export function inherits(G, o, name) {
   for (let k = 0; o && k < 64; k++, o = G.objects.get(o.parent)) if (o.name === name) return true;
   return false;
 }
@@ -1089,7 +1099,7 @@ export async function play(env) {
   // An exit back to a hub room already cleared (env.exitDone, from app.js) shows sprGreyArrow.
   const greyArrow = need('sprGreyArrow') || arrow;
   const exits = room.insts.filter(i => EXIT.objects.includes(G.objects.get(i.obj)?.name) && G.objects.get(i.obj).sprite >= 0).map(i => {
-    const o = G.objects.get(i.obj), grey = !!env.exitDone?.(i);
+    const o = G.objects.get(i.obj), grey = !!env.carry?.back || !!env.exitDone?.(i);
     const edges = [room.w - i.x, i.y, i.x, room.h - i.y];
     return { inst: i, kind: o.name, x: i.x, y: i.y, box: maskBox(G, o), off: false, live: false, grey,
       sprite: o.name === 'objNextroom' ? grey ? greyArrow : arrow : need(G.sprites.get(o.sprite).name), frame: edges.indexOf(Math.min(...edges)) };
@@ -2041,6 +2051,8 @@ export async function play(env) {
   const autoEnd = !exits.length && !elevators.length && !coupleRoom && !film && (!cleared || talks.length > 0 ||
     room.insts.some(i => ROOM_END.auto.includes(G.objects.get(i.obj)?.name)));
   let endWait = 0;
+  const carEnd = env.carry?.back && room.insts.filter(i => inherits(G, G.objects.get(i.obj), 'objCar') && G.objects.get(i.obj).sprite >= 0)
+    .map(i => { const b = maskBox(G, G.objects.get(i.obj), i), k = WALK_BACK.reach; return { x: i.x, y: i.y, box: { l: b.l - k, r: b.r + k, t: b.t - k, b: b.b + k } }; })[0];
   function stepExits() {
     const clearFloor = !enemies.some(e => e.isEnemy) && !kos.length && !bosses.length;
     if (clearFloor && !cleared && exits.length) sfx(SOUND.cleared);
@@ -2051,6 +2063,7 @@ export async function play(env) {
       x.live = clearFloor && !x.off;
       if (x.live && on && !p.dead && !p.exec) return leave(null, x);
     }
+    if (carEnd && clearFloor && !p.dead && !p.exec && overlap(p, box, carEnd, carEnd.box)) return leave();
     for (const l of elevators) if (stepElevator(l, clearFloor)) return leave(l);
     if (coupleRoom && !enemies.length && !kos.length && !p.exec && !p.dead && ++cutWait > COUPLE.cut) return leave();
     if (film?.arrived && !talks.length && !env.cutscene && ++film.wait > FILM_SET.after) return leave();
@@ -2082,7 +2095,7 @@ export async function play(env) {
     handle.stop();
     handle.left = true;
     handle.via = exit ? `${exit.kind} ${exit.x},${exit.y}` : lift ? 'elevator' : 'end';
-    const carried = { x: p.x, y: p.y, weapon: p.weapon, ammo: p.ammo, elevator: lift && { x: lift.x }, stats, character: pick.startsWith(pobj.name + ':') ? pick : pobj.name,
+    const carried = { x: p.x, y: p.y, weapon: p.weapon, ammo: p.ammo, elevator: lift && { x: lift.x }, stats, back: !!carry?.back, character: pick.startsWith(pobj.name + ':') ? pick : pobj.name,
       exit: exit?.kind === 'objNextroom' && { x: exit.inst.x, y: exit.inst.y },
       level: { rooms: { ...carry?.level?.rooms, [room.name]: { dead, weapons: weapons.map(w => ({ ...w, inst: null, speed: 0 })) } } } };
     if (!env.next || !env.next(room, carried)) env.status(`${room.name} cleared: this is the last room in order.`);
